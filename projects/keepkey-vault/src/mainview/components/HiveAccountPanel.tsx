@@ -63,7 +63,7 @@ function KeyRow({ label, value }: { label: string; value: string }) {
 	return (
 		<Flex justify="space-between" align="center" py="1.5">
 			<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" minW="62px" whiteSpace="nowrap" flexShrink="0">{label}</Text>
-			<Text fontSize="11px" fontFamily="mono" color="var(--text-2)" flex="1" mx="2" truncate>{value}</Text>
+			<Text fontSize="11px" fontFamily="mono" color="var(--text-2)" flex="1" mx="2" minW="0" wordBreak="break-all">{value}</Text>
 			<IconButton aria-label={`copy ${label} key`} size="xs" variant="ghost" flexShrink="0"
 				onClick={() => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1200) }}>
 				<Box as={copied ? FaCheck : FaCopy} fontSize="11px" color={copied ? "#34D399" : "var(--text-3)"} />

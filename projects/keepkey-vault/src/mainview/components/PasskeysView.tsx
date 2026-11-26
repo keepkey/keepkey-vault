@@ -111,7 +111,7 @@ export function PasskeysView() {
               <Flex justify="space-between" align="center" gap="3" wrap="wrap">
                 <Box minW="0">
                   <Text fontSize="sm" fontWeight="600" color={s.labelSource === 'unknown' ? 'kk.textSecondary' : 'kk.textPrimary'} wordBreak="break-all">{slotName(s)}</Text>
-                  <Text fontSize="xs" color="kk.textSecondary" wordBreak="break-all">{s.userName || uiText('No account name')}{s.labelSource === 'unknown' ? ` · ${s.rpHash.slice(0, 8)}…` : ''}</Text>
+                  <Text fontSize="xs" color="kk.textSecondary" wordBreak="break-all">{s.userName || uiText('No account name')}{s.labelSource === 'unknown' ? ` · ${s.rpHash}` : ''}</Text>
                 </Box>
                 {renaming?.rpHash === s.rpHash ? (
                   <Flex gap="2">
