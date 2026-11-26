@@ -1954,7 +1954,8 @@ function getAppSettings() {
 		// or disabled view must not hydrate or disclose wallet monitoring records.
 		moneroPendingBroadcasts: moneroEnabled && !moneroHiddenWallet(engine) ? getMoneroWallet().pendingCount() : 0,
 		passwordManagerEnabled: passwordBank.enabled,
-		passkeysEnabled: getSetting('passkeys_enabled') === '1',
+		// Windows hides FIDO HID devices from apps, so the tab could never find the KeepKey
+		passkeysEnabled: process.platform !== 'win32' && getSetting('passkeys_enabled') === '1',
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -9080,6 +9081,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			setPasskeysEnabled: async (params) => {
 				if (typeof params?.enabled !== 'boolean') throw new Error('enabled must be a boolean')
+				if (params.enabled && process.platform === 'win32') throw new Error('Passkeys are not available on Windows')
 				setSetting('passkeys_enabled', params.enabled ? '1' : '0')
 				return getAppSettings()
 			},
