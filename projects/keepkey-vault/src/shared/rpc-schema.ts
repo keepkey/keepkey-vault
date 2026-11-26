@@ -170,6 +170,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       hiveGetRoleKeys: { params: { accountIndex?: number }; response: { owner: string; active: string; posting: string; memo: string } }
       hiveGetAccount: { params: { pubkey: string }; response: { success?: boolean; noAccount?: boolean; account?: { name: string; hive: string; hbd: string; hp?: string; rcPercent?: number } } }
       hiveUsernameAvailable: { params: { name: string }; response: { success: boolean; available: boolean; reason?: string } }
+      // Self-serve onboarding (KEEPKEY-187/188): read-only Hive node queries.
+      hiveLookupAccount: { params: { name: string }; response: { found: boolean; account?: import('./hive-onboarding').HiveAccountAuthorities } }
+      hiveAccountCreationFee: { params: undefined; response: { fee: string } }
       hiveCreateAccount: { params: { username: string; accountIndex?: number }; response: { status: number; success?: boolean; txid?: string; username?: string; error?: string; retryAfter?: number } }
       hiveSignTx: { params: any; response: any }
 

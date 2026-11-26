@@ -280,6 +280,7 @@ import { createUiWatchdog } from "./ui-watchdog"
 import { fetchDefiPositions } from "./zerion"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
+import { lookupHiveAccount, hiveAccountCreationFee } from "./hive-chain"
 import { createActiveWalletWatch, refreshWatchedChain, type OwnedWatch } from "./active-wallet-watch"
 import { createDurableWalletMonitor, type DurableMonitorSession } from "./durable-wallet-monitor"
 import { createWalletMonitorRegistry } from "./wallet-monitor-registry"
@@ -6470,6 +6471,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const resp = await fetch(`${base}/api/v1/hive/account/${encodeURIComponent(pubkey)}`)
 				if (!resp.ok) throw new Error(`Pioneer hive/account ${resp.status}`)
 				return await resp.json()
+			},
+			// Self-serve onboarding when the sponsor refuses (KEEPKEY-187/188):
+			// read an account's authorities / ACT count and the live creation fee
+			// straight from public Hive nodes. Read-only; nothing is signed here.
+			hiveLookupAccount: async (params) => {
+				requireOnline('Hive account lookup')
+				const name = String(params?.name ?? '').trim().replace(/^@/, '').toLowerCase()
+				const account = await lookupHiveAccount(name)
+				return account ? { found: true, account } : { found: false }
+			},
+			hiveAccountCreationFee: async () => {
+				requireOnline('Hive account creation fee')
+				return { fee: await hiveAccountCreationFee() }
 			},
 			// Live username availability (format + on-chain), for the onboarding wizard.
 			hiveUsernameAvailable: async (params) => {

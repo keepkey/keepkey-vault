@@ -4,6 +4,8 @@ import { Box, Flex, Text, Button, Spinner, IconButton, Input } from "@chakra-ui/
 import { FaCopy, FaCheck, FaTimes, FaChevronDown, FaChevronUp, FaExternalLinkAlt } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 import { CHAINS } from "../../shared/chains"
+import { HiveSelfServe } from "./HiveSelfServe"
+import { classifyHiveSponsorConflict, offersExistingAccount, type HiveSponsorConflict } from "../lib/hive-sponsor-conflict"
 
 // One explorer for Hive, from the chain config (no hard-coded host).
 const hiveTxUrl = (txid: string) =>
@@ -166,6 +168,14 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 	const [checking, setChecking] = useState(false)
 	const [creating, setCreating] = useState(false)
 	const [error, setError] = useState<string | null>(null)
+	// A sponsor limit (409) other than a taken name. Kept apart from `error` so
+	// the copy is translated and can carry the "use an existing account" exit.
+	const [conflict, setConflict] = useState<Exclude<HiveSponsorConflict, "name-taken"> | null>(null)
+	const [existingSoon, setExistingSoon] = useState(false)
+	// Any sponsor refusal (409 of any kind, 401/403/503/400, or an error) offers
+	// the self-serve path (KEEPKEY-187) so the user is never stuck. Sticky for
+	// the session: renaming the input must not hide a path already opened.
+	const [selfServe, setSelfServe] = useState(false)
 	const [needsFunding, setNeedsFunding] = useState<string | null>(null) // 0x ETH address to fund, or null
 	const [created, setCreated] = useState<{ name: string; txid?: string } | null>(null)
 	const [viewing, setViewing] = useState(false)        // "View account" lookup in flight
@@ -179,7 +189,7 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 
 	// Debounced availability check as the user types.
 	useEffect(() => {
-		setAvail(null); setError(null)
+		setAvail(null); setError(null); setConflict(null); setExistingSoon(false)
 		if (debounce.current) clearTimeout(debounce.current)
 		const name = username.trim().toLowerCase()
 		latestName.current = name
@@ -218,7 +228,7 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 	const create = async () => {
 		const name = username.trim().toLowerCase()
 		if (!name || avail?.available !== true || avail.name !== name || creating) return
-		setCreating(true); setError(null); setNeedsFunding(null)
+		setCreating(true); setError(null); setConflict(null); setExistingSoon(false); setNeedsFunding(null)
 		try {
 			const r = await rpcRequest<CreateResp>("hiveCreateAccount", { username: name }, 120000)
 			if (r.status === 200 && (r.success || r.txid)) {
@@ -236,6 +246,7 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 				poll(2500)
 				return
 			}
+			setSelfServe(true)
 			// 403: ETH gate — the device's ETH address must hold mainnet ETH (one
 			// sponsored account per funded address). Show a dedicated fund-me screen.
 			if (r.status === 403) {
@@ -243,12 +254,14 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 					.then(s => setNeedsFunding(s.addresses.find(a => a.addressIndex === 0)?.address ?? ""))
 					.catch(() => setNeedsFunding(""))
 			}
-			// 409 is overloaded: either the username was just taken, or this ETH
-			// address already claimed its one sponsored account. Server error text
-			// disambiguates; reformat-fail back to name-taken.
+			// 409 is overloaded: the name was just taken, this KeepKey's ETH address
+			// already claimed its sponsored account, or this vault installation
+			// (Pioneer "client") already sponsored one. Only the server's prose tells
+			// them apart — see hive-sponsor-conflict.ts.
 			else if (r.status === 409) {
-				if (/eth|address/i.test(r.error ?? "")) setError("This device already has a sponsored Hive account.")
-				else { setError("That name was just taken — pick another."); setAvail({ success: true, available: false, reason: "taken", name }) }
+				const kind = classifyHiveSponsorConflict(r.error)
+				if (kind === "name-taken") { setError("That name was just taken — pick another."); setAvail({ success: true, available: false, reason: "taken", name }) }
+				else setConflict(kind)
 			}
 			else if (r.status === 401) setError("Device confirmation didn't verify. Try again.")
 			else if (r.status === 503) setError(`Sponsor is busy. Try again in ${r.retryAfter ?? 60}s.`)
@@ -259,6 +272,7 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 			// bare "device or network error" here masked a missing hdwallet binding
 			// (wallet.hiveSignAccountCreate is not a function) and sent us hunting Pioneer.
 			const m = (e as any)?.message
+			setSelfServe(true)
 			setError(m ? `Account creation failed — ${m}` : "Account creation failed — device or network error.")
 		} finally { setCreating(false) }
 	}
@@ -282,6 +296,7 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 			) : <Text fontSize="11px" color="var(--text-3)" mt="3">{uiText("Open the Ethereum asset to view your receive address.")}</Text>}
 			<Button mt="4" w="100%" bg={color} color="white" _hover={{ filter: "brightness(1.1)" }}
 				onClick={() => setNeedsFunding(null)}>{uiText("I've funded it — retry")}</Button>
+			<HiveSelfServe keys={keys} activeKey={activeKey} initialName={name} onResolved={onCreated} />
 		</Box>
 	)
 
@@ -330,6 +345,25 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 				{creating ? <><Spinner size="sm" mr="2" />{" "}{uiText("Confirm on your device…")}</> : uiText("Create account")}
 			</Button>
 			{error && <Text fontSize="11px" color="#F87171" mt="2" textAlign="center">{error}</Text>}
+			{conflict && (
+				<Box mt="3" p="3" borderRadius="md" bg="var(--surface-1)" data-hive-conflict={conflict}>
+					<Text fontSize="12px" color="var(--text-1)" lineHeight="1.5">
+						{conflict === "eth-address" ? uiText("This KeepKey's Ethereum address already claimed its free Hive account. KeepKey sponsors one account per ETH address.")
+							: conflict === "client" ? uiText("This copy of KeepKey Vault already created its free Hive account. KeepKey sponsors one account per installation, even with a different KeepKey.")
+							: uiText("A free Hive account was already claimed, either by this KeepKey's Ethereum address or by this copy of KeepKey Vault. KeepKey sponsors one account per ETH address and one per installation.")}
+					</Text>
+					{offersExistingAccount(conflict) && (<>
+						<Text fontSize="12px" fontWeight="600" color="var(--text-0)" mt="3">{uiText("Already have a Hive account?")}</Text>
+						{/* Placeholder: importing an existing Hive account comes in a later change. */}
+						<Button mt="2" w="100%" size="sm" variant="outline" data-hive-use-existing onClick={() => setExistingSoon(true)}>
+							{uiText("Use it with your KeepKey")}
+						</Button>
+						{existingSoon && <Text fontSize="11px" color="var(--text-3)" mt="2" textAlign="center">{uiText("Coming soon: bring an existing Hive account to your KeepKey.")}</Text>}
+					</>)}
+				</Box>
+			)}
+
+			{selfServe && <HiveSelfServe keys={keys} activeKey={activeKey} initialName={name} onResolved={onCreated} />}
 
 			<Flex mt="3" align="center" gap="1.5" cursor="pointer" onClick={() => setShowKeys(s => !s)}>
 				<Box as={showKeys ? FaChevronUp : FaChevronDown} fontSize="9px" color="var(--text-3)" />
