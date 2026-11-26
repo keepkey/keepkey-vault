@@ -137,9 +137,6 @@ def build(archives, work, output, jobs, target="darwin-arm64"):
         with (work / logfile).open("w") as log:
             log.write(json.dumps(list(map(str, command))) + "\n"); log.flush()
             environment = {**os.environ, "SOURCE_DATE_EPOCH": str(source["sourceDateEpoch"]), "ZERO_AR_DATE": "1"}
-            if target == "win32-x64":
-                # Native MinGW tools get explicit native paths; never rewrite them.
-                environment["MSYS2_ARG_CONV_EXCL"] = "*"
             result = subprocess.run(command, cwd=cwd, env=environment, stdout=log, stderr=subprocess.STDOUT)
         if result.returncode:
             raise RuntimeError("Native build failed; inspect " + str(work / logfile))

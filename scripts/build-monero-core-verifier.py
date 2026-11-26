@@ -111,7 +111,7 @@ def build(archives, work, output, jobs, target="darwin-arm64"):
             log.write(json.dumps(list(map(str, command))) + "\n"); log.flush()
             environment = None
             if target == "win32-x64":
-                environment = {**os.environ, "MSYS2_ARG_CONV_EXCL": "*", "SOURCE_DATE_EPOCH": "1790640000"}
+                environment = {**os.environ, "SOURCE_DATE_EPOCH": "1790640000"}
             result = subprocess.run(command, cwd=cwd, env=environment, stdout=log, stderr=subprocess.STDOUT)
         if result.returncode:
             raise RuntimeError("Native build failed; inspect " + str(work / logfile))
