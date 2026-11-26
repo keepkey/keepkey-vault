@@ -63,8 +63,8 @@ async function request(name: string, body: unknown, options: Options = {}) {
     }, '127.0.0.1')
   } finally { Bun.serve = serve }
   try {
-    const input = new Request('http://rest-admission.invalid' + (options.path ?? '/utxo/sign-transaction'), {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...(options.authenticated === false ? {} : { Authorization: `Bearer ${apiKey}` }) },
+    const input = new Request('http://127.0.0.1:1646' + (options.path ?? '/utxo/sign-transaction'), {
+      method: 'POST', headers: { Host: '127.0.0.1:1646', 'Content-Type': 'application/json', ...(options.authenticated === false ? {} : { Authorization: `Bearer ${apiKey}` }) },
       body: JSON.stringify(body),
     })
     const response = await route!(input, fakeServer)
