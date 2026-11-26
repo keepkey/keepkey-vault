@@ -495,5 +495,12 @@
   "mbac398ff": "Il tuo wallet",
   "mc824d131": "Configuriamo il tuo hardware wallet. Ci vogliono circa 5 minuti.",
   "m69dbec3c": "Trova ogni lettera sulla tua KeepKey, poi fai clic qui nella stessa posizione.",
-  "m80be4c74": "Posizione {{n}}"
+  "m80be4c74": "Posizione {{n}}",
+  "mc97ca160": "Aggiorna saldo",
+  "m558d4ecc": "Nascondi rete",
+  "m6900fab5": "Sempre attiva",
+  "m3249fc9f": "Reti nascoste ({{count}})",
+  "mdc800411": "Mostra {{chain}}",
+  "m29742e5c": "Mostra",
+  "macd079af": "Vault salva l’archivio cifrato delle password nel proprio database locale. Per recuperarlo servono i dati dell’archivio, lo stesso seed e la stessa passphrase del portafoglio."
 }

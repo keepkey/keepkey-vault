@@ -497,5 +497,12 @@
   "mbac398ff": "Twój portfel",
   "mc824d131": "Skonfigurujmy twój portfel sprzętowy. Zajmie to około 5 minut.",
   "m69dbec3c": "Znajdź każdą literę na KeepKey, a potem kliknij tutaj tę samą pozycję.",
-  "m80be4c74": "Pozycja {{n}}"
+  "m80be4c74": "Pozycja {{n}}",
+  "mc97ca160": "Odśwież saldo",
+  "m558d4ecc": "Ukryj sieć",
+  "m6900fab5": "Zawsze włączona",
+  "m3249fc9f": "Ukryte sieci ({{count}})",
+  "mdc800411": "Pokaż {{chain}}",
+  "m29742e5c": "Pokaż",
+  "macd079af": "Vault przechowuje zaszyfrowany sejf haseł w lokalnej bazie danych. Odzyskanie wymaga danych sejfu, tego samego ziarna i tego samego hasła portfela."
 }

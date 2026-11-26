@@ -489,5 +489,12 @@
   "mbac398ff": "Ihre Wallet",
   "mc824d131": "Richten wir Ihre Hardware-Wallet ein. Das dauert etwa 5 Minuten.",
   "m69dbec3c": "Suchen Sie jeden Buchstaben auf Ihrer KeepKey und klicken Sie hier auf dieselbe Position.",
-  "m80be4c74": "Position {{n}}"
+  "m80be4c74": "Position {{n}}",
+  "mc97ca160": "Guthaben aktualisieren",
+  "m558d4ecc": "Netzwerk ausblenden",
+  "m6900fab5": "Immer aktiv",
+  "m3249fc9f": "Ausgeblendete Netzwerke ({{count}})",
+  "mdc800411": "{{chain}} einblenden",
+  "m29742e5c": "Einblenden",
+  "macd079af": "Vault speichert den verschlüsselten Passwortspeicher in seiner lokalen Datenbank. Für die Wiederherstellung sind die gespeicherten Daten, dieselben Wiederherstellungswörter und dieselbe Wallet-Passphrase erforderlich."
 }

@@ -18,7 +18,6 @@ type Registry = {
   bankId: string
   algorithm: typeof PASSWORD_BANK_ALGORITHM
   revision: number
-  backedUpRevision: number
   nextSlot: number
   ready: number[]
   profiles: StoredPasswordProfile[]
@@ -176,7 +175,8 @@ export class PasswordBank {
     const iv = randomBytes(12)
     const cipher = createCipheriv('aes-256-gcm', new Uint8Array(key), new Uint8Array(iv))
     cipher.setAAD(new TextEncoder().encode(`keepkey-password-bank/${registry.version}/${registry.bankId}`))
-    const plaintext = Buffer.from(JSON.stringify(registry))
+    // Earlier Vault versions expect this field in both envelope versions.
+    const plaintext = Buffer.from(JSON.stringify({ backedUpRevision: -1, ...registry }))
     try {
       const ciphertext = Buffer.concat([new Uint8Array(cipher.update(new Uint8Array(plaintext))), new Uint8Array(cipher.final())])
       return { format: 'keepkey-password-bank', version: registry.version, bankId: registry.bankId, iv: iv.toString('base64'), ciphertext: ciphertext.toString('base64'), tag: cipher.getAuthTag().toString('base64') }
@@ -199,7 +199,7 @@ export class PasswordBank {
     catch { throw new Error('This encrypted bank could not be verified for the current KeepKey wallet.') }
     try {
       const r = JSON.parse(plain.toString('utf8')) as Registry
-      if (r.version !== b.version || r.bankId !== b.bankId || r.algorithm !== PASSWORD_BANK_ALGORITHM || !Number.isSafeInteger(r.revision) || r.revision < 0 || !Number.isSafeInteger(r.backedUpRevision) || r.backedUpRevision > r.revision || !Number.isSafeInteger(r.nextSlot) || r.nextSlot < 0 || r.nextSlot > MAX_SLOTS || !Array.isArray(r.profiles) || !Array.isArray(r.ready) || r.profiles.length > MAX_SLOTS) throw new Error('Invalid password-bank registry')
+      if (r.version !== b.version || r.bankId !== b.bankId || r.algorithm !== PASSWORD_BANK_ALGORITHM || !Number.isSafeInteger(r.revision) || r.revision < 0 || !Number.isSafeInteger(r.nextSlot) || r.nextSlot < 0 || r.nextSlot > MAX_SLOTS || !Array.isArray(r.profiles) || !Array.isArray(r.ready) || r.profiles.length > MAX_SLOTS) throw new Error('Invalid password-bank registry')
       if (r.version === 2) {
         if (!Number.isSafeInteger(r.symbolFromSlot) || r.symbolFromSlot < 0 || r.symbolFromSlot >= r.nextSlot) throw new Error('Invalid password format boundary')
       } else if (r.symbolFromSlot !== undefined) throw new Error('Invalid password format boundary')
@@ -248,12 +248,12 @@ export class PasswordBank {
       readySlots: r.ready.map(slot => ({
         slot, symbolFormat: usesSymbolFormat(r, slot), cachedUntil: this.cache.get(slot)?.expiresAt,
       })),
-      backupRequired: r.backedUpRevision !== r.revision, revision: r.revision,
+      revision: r.revision,
     }
   }
   private empty(enabled: boolean): PasswordBankView {
     const setting = enabled ? this.bankSetting() : null
-    return { enabled, exists: !!setting && !!this.deps.read(setting), walletPending: enabled && !setting, unlocked: false, algorithm: PASSWORD_BANK_ALGORITHM, profiles: [], readySlots: [], backupRequired: false, revision: 0 }
+    return { enabled, exists: !!setting && !!this.deps.read(setting), walletPending: enabled && !setting, unlocked: false, algorithm: PASSWORD_BANK_ALGORITHM, profiles: [], readySlots: [], revision: 0 }
   }
   async unlock(create = false, importJson?: string, recoverLegacy = false) {
     return this.exclusive(async () => {
@@ -287,7 +287,7 @@ export class PasswordBank {
         const device = this.deps.device()
         const key = await this.derive(bankId)
         try {
-          const registry = backup ? this.open(backup, key) : { version: 1 as const, bankId, algorithm: PASSWORD_BANK_ALGORITHM, revision: 0, backedUpRevision: -1, nextSlot: 0, ready: [], profiles: [] }
+          const registry = backup ? this.open(backup, key) : { version: 1 as const, bankId, algorithm: PASSWORD_BANK_ALGORITHM, revision: 0, nextSlot: 0, ready: [], profiles: [] }
           if (this.bankSetting() !== setting) throw new Error('KeepKey wallet changed during password bank unlock. Try again.')
           this.saveRegistry(setting, JSON.stringify(this.seal(registry, key)), stored)
           this.registrySetting = setting
@@ -353,8 +353,8 @@ export class PasswordBank {
   }
   reveal(id: string, pending = false) {
     const r = this.active(), p = this.profile(r, id), slot = pending ? p.pendingSlot : p.slot
-    if (pending && (p.rotationState !== 'submitted' || r.backedUpRevision !== r.revision)) {
-      throw new Error('Begin the website change and save the encrypted backup before accessing the new password')
+    if (pending && p.rotationState !== 'submitted') {
+      throw new Error('Begin the website change before accessing the new password')
     }
     const c = slot === undefined ? undefined : this.cache.get(slot)
     if (!c) throw new Error('Password cache expired. Rehydrate this entry with KeepKey.')
@@ -362,6 +362,7 @@ export class PasswordBank {
   }
   rotate(id: string, action: 'prepare' | 'submitted' | 'verify' | 'cancel', confirmed: boolean) {
     const r = this.copy(), p = this.profile(r, id)
+    let retiredSlot: number | undefined
     if (action === 'prepare') {
       if (p.pendingSlot !== undefined) throw new Error('Resolve the current rotation first')
       const readyIndex = r.ready.findIndex(slot => usesSymbolFormat(r, slot))
@@ -370,34 +371,22 @@ export class PasswordBank {
       p.pendingSlot = slot; p.rotationState = 'prepared'
     } else if (action === 'submitted') {
       if (p.rotationState !== 'prepared') throw new Error('Prepare a new password first')
-      if (r.backedUpRevision !== r.revision) throw new Error('Export the latest recovery backup before changing the website password')
       p.rotationState = 'submitted'
     } else if (action === 'verify') {
       if (p.rotationState !== 'submitted' || !confirmed || p.pendingSlot === undefined) throw new Error('Confirm a successful sign-in with the new password first')
-      if (r.backedUpRevision !== r.revision) throw new Error('Save the encrypted backup before finishing the password change')
-      this.cache.get(p.slot)?.bytes.fill(0); this.cache.delete(p.slot)
+      retiredSlot = p.slot
       p.slot = p.pendingSlot; delete p.pendingSlot; p.rotationState = 'active'; p.changedAt = this.now()
     } else if (action === 'cancel') {
       if (p.rotationState !== 'prepared' || p.pendingSlot === undefined) throw new Error('A submitted change must be reconciled; it cannot be discarded')
-      this.cache.get(p.pendingSlot)?.bytes.fill(0); this.cache.delete(p.pendingSlot)
+      retiredSlot = p.pendingSlot
       delete p.pendingSlot; p.rotationState = 'active'
     } else throw new Error('Invalid rotation action')
+    // Keep both locations available until the updated journal has committed.
     this.commit(r)
-    return this.view()
-  }
-  exportBackup() {
-    const next = this.copy()
-    next.backedUpRevision = next.revision
-    const json = JSON.stringify(this.seal(next), null, 2)
-    // Generating a backup is not proof it was saved. Acknowledge after writing.
-    return { json, revision: next.revision }
-  }
-  acknowledgeBackup(revision: number) {
-    const next = this.copy()
-    if (revision !== next.revision) throw new Error('The bank changed. Export the latest backup again.')
-    next.backedUpRevision = revision
-    this.saveRegistry(this.registrySetting!, JSON.stringify(this.seal(next)))
-    this.registry = next
+    if (retiredSlot !== undefined) {
+      this.cache.get(retiredSlot)?.bytes.fill(0)
+      this.cache.delete(retiredSlot)
+    }
     return this.view()
   }
 }

@@ -500,5 +500,12 @@
   "mbac398ff": "Ví của bạn",
   "mc824d131": "Hãy thiết lập ví phần cứng của bạn. Mất khoảng 5 phút.",
   "m69dbec3c": "Tìm từng chữ cái trên KeepKey, rồi bấm vào cùng vị trí ở đây.",
-  "m80be4c74": "Vị trí {{n}}"
+  "m80be4c74": "Vị trí {{n}}",
+  "mc97ca160": "Làm mới số dư",
+  "m558d4ecc": "Ẩn mạng",
+  "m6900fab5": "Luôn bật",
+  "m3249fc9f": "Mạng đã ẩn ({{count}})",
+  "mdc800411": "Hiện {{chain}}",
+  "m29742e5c": "Hiện",
+  "macd079af": "Vault lưu kho mật khẩu đã mã hóa trong cơ sở dữ liệu cục bộ. Để khôi phục, cần có dữ liệu kho, cùng cụm từ khôi phục và mật khẩu bổ sung của ví."
 }

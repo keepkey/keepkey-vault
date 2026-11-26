@@ -500,5 +500,12 @@
   "mbac398ff": "Cüzdanınız",
   "mc824d131": "Donanım cüzdanınızı kuralım. Yaklaşık 5 dakika sürer.",
   "m69dbec3c": "Her harfi KeepKey'inizde bulun, ardından burada aynı konuma tıklayın.",
-  "m80be4c74": "Konum {{n}}"
+  "m80be4c74": "Konum {{n}}",
+  "mc97ca160": "Bakiyeyi yenile",
+  "m558d4ecc": "Ağı gizle",
+  "m6900fab5": "Her zaman açık",
+  "m3249fc9f": "Gizli ağlar ({{count}})",
+  "mdc800411": "{{chain}} ağını göster",
+  "m29742e5c": "Göster",
+  "macd079af": "Vault, şifreli parola kasasını yerel veritabanında saklar. Kurtarma için kasa verileri, aynı kurtarma sözcükleri ve aynı cüzdan parola ifadesi gerekir."
 }

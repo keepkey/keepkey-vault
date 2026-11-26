@@ -496,5 +496,12 @@
   "mbac398ff": "Tu billetera",
   "mc824d131": "Configuremos tu billetera de hardware. Tarda unos 5 minutos.",
   "m69dbec3c": "Busca cada letra en tu KeepKey y haz clic aquí en la misma posición.",
-  "m80be4c74": "Posición {{n}}"
+  "m80be4c74": "Posición {{n}}",
+  "mc97ca160": "Actualizar saldo",
+  "m558d4ecc": "Ocultar red",
+  "m6900fab5": "Siempre activa",
+  "m3249fc9f": "Redes ocultas ({{count}})",
+  "mdc800411": "Mostrar {{chain}}",
+  "m29742e5c": "Mostrar",
+  "macd079af": "Vault guarda el almacén de contraseñas cifrado en su base de datos local. Para recuperarlo se necesitan los datos del almacén y la misma semilla y frase de contraseña de la cartera."
 }

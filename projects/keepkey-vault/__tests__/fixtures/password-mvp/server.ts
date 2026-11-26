@@ -2,26 +2,36 @@
 import { createHmac } from 'node:crypto'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
-import { PasswordBank } from '../../../src/bun/password-bank'
+import { PasswordBank, PASSWORD_BANK_SETTING } from '../../../src/bun/password-bank'
 const db = new Map<string, string>()
 let moneroEnabled = false
 let alphaFirmware = false
 let moneroPendingBroadcasts = 0
-let backupFailure = false
+let databaseWriteFailure = false
 let openedWebsites = 0
 let clipboardValue = ''
 let clipboardWrites = 0
 let revealReads = 0
-const bank = new PasswordBank({ read: k => db.get(k) || null, write: (k, v) => { db.set(k, v) }, device: () => ({ session: 'synthetic-device', cipher: async (p, l) => new Uint8Array(createHmac('sha256', 'PUBLIC UI TEST FIXTURE ONLY').update(JSON.stringify(p)).update(l).digest()) }) })
+const bank = new PasswordBank({
+  read: k => db.get(k) || null,
+  write: (k, v) => {
+    if (databaseWriteFailure && k === PASSWORD_BANK_SETTING) throw new Error('Password bank database unavailable')
+    db.set(k, v)
+  },
+  device: () => ({
+    session: 'synthetic-device',
+    cipher: async (path, label) => new Uint8Array(createHmac('sha256', 'PUBLIC UI TEST FIXTURE ONLY').update(JSON.stringify(path)).update(label).digest()),
+  }),
+})
 const settings = () => ({ passwordManagerEnabled: bank.enabled, moneroEnabled, alphaFirmware, moneroPendingBroadcasts, moneroAvailable: true, moneroNodeMode: 'local', moneroDaemonUrl: 'http://127.0.0.1:18081', moneroRestoreHeight: 0, restApiEnabled: false, btcMultisigEnabled: false, walletConnectEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', disabledNetworks: [], evmSimulationRpcUrls: {}, appLanguage: 'en' })
 const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
   const { method, params: p } = await req.json()
   try {
     let payload: unknown = {}
     switch (method) {
-      case 'testReset': bank.lock(); db.clear(); moneroEnabled = false; alphaFirmware = false; moneroPendingBroadcasts = 0; backupFailure = false; openedWebsites = 0; clipboardValue = ''; clipboardWrites = 0; revealReads = 0; payload = settings(); break
+      case 'testReset': bank.lock(); db.clear(); moneroEnabled = false; alphaFirmware = false; moneroPendingBroadcasts = 0; databaseWriteFailure = false; openedWebsites = 0; clipboardValue = ''; clipboardWrites = 0; revealReads = 0; payload = settings(); break
       case 'testMoneroPending': moneroPendingBroadcasts = p.count; payload = settings(); break
-      case 'testBackupFailure': backupFailure = p.enabled; break
+      case 'testDatabaseWriteFailure': databaseWriteFailure = p.enabled; break
       case 'testOpenedWebsites': payload = openedWebsites; break
       case 'testPasswordClipboard': payload = { writes: clipboardWrites, revealReads, matches: clipboardValue === bank.reveal(p.id, p.pending).password }; break
       case 'openExternal': openedWebsites++; break
@@ -39,7 +49,6 @@ const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
       case 'passwordBankCopy': clipboardValue = bank.reveal(p.id, p.pending).password; clipboardWrites++; break
       case 'passwordBankRehydrate': payload = await bank.rehydrate(p.id, p.pending, p.ttlMinutes); break
       case 'passwordBankRotate': payload = bank.rotate(p.id, p.action, p.confirmed); break
-      case 'passwordBankSaveBackup': { if (backupFailure) throw new Error('Backup disk unavailable'); const backup = bank.exportBackup(); bank.acknowledgeBackup(backup.revision); payload = { filePath: '/synthetic/keepkey-passwords.json', revision: backup.revision }; break }
       case 'passwordBankImport': payload = await bank.unlock(false, p.json); break
       case 'listBip85Seeds': payload = []; break
       case 'getFeatures': payload = { label: 'Synthetic test KeepKey', policiesList: [] }; break

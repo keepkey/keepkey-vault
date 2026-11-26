@@ -490,5 +490,12 @@
   "mbac398ff": "Je wallet",
   "mc824d131": "Laten we je hardware wallet instellen. Het duurt ongeveer 5 minuten.",
   "m69dbec3c": "Zoek elke letter op je KeepKey en klik hier op dezelfde positie.",
-  "m80be4c74": "Positie {{n}}"
+  "m80be4c74": "Positie {{n}}",
+  "mc97ca160": "Saldo vernieuwen",
+  "m558d4ecc": "Netwerk verbergen",
+  "m6900fab5": "Altijd aan",
+  "m3249fc9f": "Verborgen netwerken ({{count}})",
+  "mdc800411": "{{chain}} tonen",
+  "m29742e5c": "Tonen",
+  "macd079af": "Vault bewaart de versleutelde wachtwoordkluis in de lokale database. Voor herstel zijn de kluisgegevens, dezelfde seed en dezelfde wachtwoordzin van de wallet nodig."
 }
