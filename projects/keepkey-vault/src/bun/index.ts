@@ -1426,7 +1426,8 @@ async function requestSigningApprovalDecision(id: string, signal?: AbortSignal) 
 }
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
-let walletConnectEnabled = true
+// WalletConnect is always on (old DBs may still hold walletconnect_enabled='0'; ignored)
+const walletConnectEnabled = true
 let moneroEnabled = false
 /** Own node is preferred. Existing explicit remote URLs are preserved. */
 const MONERO_DEFAULT_NODE = MONERO_LOCAL_URL
@@ -1542,7 +1543,6 @@ function loadSettings() {
 	moneroEnabled = getSetting('monero_enabled') === '1' && isMoneroSidecarAvailable()
 	setMoneroEmulatorEnabled(moneroEnabled)
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
-	walletConnectEnabled = getSetting('walletconnect_enabled') !== '0'
 	const storedZcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	const zcashSidecarAvailable = !!findZcashCliBinary()
 	zcashPrivacyEnabled = storedZcashPrivacyEnabled && zcashSidecarAvailable
@@ -9316,15 +9316,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 notifyVaultsChanged() // Safe/Vault lists show or hide with the toggle
                 return getAppSettings()
             },
-            setWalletConnectEnabled: async (params) => {
-				if (params.enabled && isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) {
-					throw new Error('WalletConnect is not available on bitcoin-only firmware')
-				}
-				walletConnectEnabled = params.enabled
-				setSetting('walletconnect_enabled', params.enabled ? '1' : '0')
-				console.log('[settings] WalletConnect enabled:', params.enabled)
-				return getAppSettings()
-			},
 			setEmulatorEnabled: async (params) => {
 				// Refuse to enable on platforms with no emulator support. The
 				// emulator runs on macOS (Keychain) and Windows (DPAPI); Linux

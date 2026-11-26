@@ -381,7 +381,6 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setNumberLocale: { params: { locale: string }; response: AppSettings }
       setAppLanguage: { params: { language: string }; response: AppSettings }
       setBtcMultisigEnabled: { params: { enabled: boolean }; response: AppSettings }
-      setWalletConnectEnabled: { params: { enabled: boolean }; response: AppSettings }
       setOfflineMode: { params: { enabled: boolean }; response: AppSettings }
       setBtcNode: { params: { enabled: boolean; type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: AppSettings }
       testBtcNode: { params: { type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean; inSync?: boolean; detectedType?: 'blockbook' | 'core' } }
