@@ -2001,16 +2001,43 @@ export function apiLogScanTxidExists(txid: string, deviceId?: string, walletId?:
   } catch { return false }
 }
 
-/** Update metadata for an existing rebuilt scan row. */
+/** A partial (stale or degraded) history row merged into the stored one (KEEPKEY-207). The stored row wins: a
+ *  degraded provider may hold an older version of the same txid, so the partial answer only fills fields the stored
+ *  row lacks and can only raise confirmations / block height. Value, addresses, fee, direction and receive proofs are
+ *  never replaced. A fresh scan does not use this, so it can still correct a row (e.g. after a reorg). */
+export function mergePartialTxMeta(stored: Record<string, any> | null, meta: Record<string, any>): Record<string, any> {
+  if (!stored) return meta
+  const merged: Record<string, any> = { ...stored }
+  for (const [key, value] of Object.entries(meta)) if ((merged[key] === undefined || merged[key] === null) && value !== undefined) merged[key] = value
+  for (const key of ['confirmations', 'blockHeight'] as const) {
+    const before = Number(stored[key]), after = Number(meta[key])
+    if (Number.isFinite(after) && (!Number.isFinite(before) || after > before)) merged[key] = meta[key]
+  }
+  return merged
+}
+
+/** Update metadata for an existing rebuilt scan row. `noRegress`: the row comes from partial history,
+ *  so merge it into the stored row with mergePartialTxMeta (the stored row wins) instead of replacing it. */
 export function updateApiLogTxMeta(
   txid: string,
   meta: Record<string, any>,
   deviceId?: string,
   walletId?: string,
   activity?: { activityType?: string; chain?: string; route?: string; timestamp?: number },
+  options?: { noRegress?: boolean },
 ) {
   try {
     if (!db) return
+    if (options?.noRegress) {
+      const where = walletId ? 'wallet_id = ?' : deviceId ? 'device_id = ?' : '1 = 1'
+      const row = db.query(`SELECT response_body FROM api_log WHERE txid = ? AND ${where} AND method = 'SCAN' LIMIT 1`)
+        .get(...(walletId ? [txid, walletId] : deviceId ? [txid, deviceId] : [txid])) as { response_body?: string } | null
+      let stored: Record<string, any> | null = null
+      try { stored = row?.response_body ? JSON.parse(row.response_body) : null } catch { stored = null }
+      meta = mergePartialTxMeta(stored && typeof stored === 'object' ? stored : null, meta)
+      // A partial answer must not move the row in time or change what it is (activity_type stays with meta.direction).
+      activity = activity ? { chain: activity.chain, route: activity.route } : activity
+    }
     const setSql: string[] = ['response_body = ?']
     const args: any[] = [JSON.stringify(meta)]
     if (activity?.activityType) { setSql.push('activity_type = ?'); args.push(activity.activityType) }

@@ -57,6 +57,9 @@ export type ActivityHistoryChainResult = {
   skippedNoTxid: number
   skippedDuplicate: number
   error?: string
+  /** Some query answered with partial history (KEEPKEY-207): its transactions were kept without regressing stored
+   *  rows, but this chain was not freshly scanned. Never set together with `error`. */
+  partial?: boolean
 }
 
 export type ActivityHistoryRebuildResult = {
@@ -75,6 +78,7 @@ export type ActivityHistoryRebuildResult = {
     skippedNoTxid: number
     skippedDuplicate: number
     failedChains: number
+    partialChains: number
   }
 }
 
@@ -206,14 +210,38 @@ export function normalizeMeta(tx: any, activityType = normalizeActivityType(tx),
   }
 }
 
-export function unwrapHistoryTransactions(resp: any, expectedQueries = 1): any[] {
+/** The error a caller gets for partial history: distinct from HISTORY_INCOMPLETE in the logs. */
+export const partialHistoryMessage = (chainId: string) =>
+  `History is partial for ${chainId}: kept what arrived, retrying for a fresh scan`
+
+/** Thrown when a history answer is shaped wrong (no histories, wrong count, no transactions list). */
+export const HISTORY_INCOMPLETE = 'History response is incomplete or stale'
+
+/**
+ * The transactions in a history answer, and whether the answer is partial (KEEPKEY-207).
+ *
+ * Partial = the provider flagged it stale, degraded, failed, still loading, or with an error for a query. Its
+ * transactions are real but may be old or missing some: callers may keep them (without regressing stored rows),
+ * never treat them as a fresh scan. A malformed answer still throws.
+ */
+export function unwrapHistory(resp: any, expectedQueries = 1): { txs: any[]; partial: boolean } {
   const outer = resp?.data || resp
   const data = Array.isArray(outer?.histories) ? outer : outer?.data
   const histories = data?.histories
   const degraded = (value: any) => value?.success === false || value?.meta?.degraded || value?.meta?.failures?.length || value?.meta?.staleChains?.length
-  if (!Array.isArray(histories) || histories.length !== expectedQueries || degraded(outer) || degraded(data)
-    || histories.some((history: any) => !Array.isArray(history?.transactions) || history.error || history.fresh === false || history.isStale === true || history.loading === true)) throw new Error('History response is incomplete or stale')
-  return histories.flatMap((history: any) => history.transactions)
+  const flagged = (history: any) => !!history?.error || history?.fresh === false || history?.isStale === true || history?.loading === true
+  if (!Array.isArray(histories) || histories.length !== expectedQueries) throw new Error(HISTORY_INCOMPLETE)
+  // A query without a transactions list is only acceptable when the provider says why (it is partial).
+  if (histories.some((history: any) => !Array.isArray(history?.transactions) && !flagged(history))) throw new Error(HISTORY_INCOMPLETE)
+  const partial = !!(degraded(outer) || degraded(data) || histories.some(flagged))
+  return { txs: histories.flatMap((history: any) => Array.isArray(history?.transactions) ? history.transactions : []), partial }
+}
+
+/** Fresh history only: anything partial or malformed throws (e.g. before trusting it as a payment scan). */
+export function unwrapHistoryTransactions(resp: any, expectedQueries = 1): any[] {
+  const { txs, partial } = unwrapHistory(resp, expectedQueries)
+  if (partial) throw new Error(HISTORY_INCOMPLETE)
+  return txs
 }
 
 export function verifiedNativeReceive(tx: any, nativeCaip: string): boolean {
@@ -346,6 +374,7 @@ export async function rebuildActivityHistory(params: {
       skippedNoTxid: 0,
       skippedDuplicate: 0,
       failedChains: 0,
+      partialChains: 0,
     },
   }
 
@@ -375,6 +404,7 @@ export async function rebuildActivityHistory(params: {
 
       for (const query of queries) {
         let txs: any[]
+        let partial = false
         const btcBackend = chain.id === 'bitcoin' ? getBtcBackend() : null
         if (btcBackend && btcBackend.kind !== 'pioneer') {
           if (!btcBackend.transactionHistory) {
@@ -394,7 +424,8 @@ export async function rebuildActivityHistory(params: {
             PIONEER_TIMEOUT_MS,
             `GetTransactionHistory(${chain.symbol}:${query.label})`,
           )
-          txs = unwrapHistoryTransactions(resp)
+          ;({ txs, partial } = unwrapHistory(resp))
+          if (partial) chainResult.partial = true
         }
         chainResult.queries.push({
           label: query.label,
@@ -460,7 +491,7 @@ export async function rebuildActivityHistory(params: {
                 chain: chain.symbol,
                 route,
                 timestamp,
-              })
+              }, { noRegress: partial })
             } else {
               insertApiLog({
                 ...params.scope,
@@ -485,6 +516,8 @@ export async function rebuildActivityHistory(params: {
       chainResult.error = err?.message || String(err)
       result.totals.failedChains++
     }
+    if (chainResult.error) delete chainResult.partial
+    else if (chainResult.partial) result.totals.partialChains++
 
     result.totals.txs += chainResult.txs
     result.totals.inserted += chainResult.inserted

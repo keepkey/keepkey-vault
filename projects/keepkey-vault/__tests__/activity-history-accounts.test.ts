@@ -10,7 +10,7 @@ mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => ({ GetTransac
   requests.push({ body, options })
   return { data: { histories: [{ transactions: body.queries[0].pubkey === 'p2sh-p2wpkh:49:0' ? [{ txid: 'wrapped-send', confirmations: 1, direction: 'outgoing', value: '0.1', timestamp: 1700000000 }] : [] }] } }
 } }) }))
-const { deriveHistoryQueries, rebuildActivityHistory, clearHistoryQueryCache, verifiedNativeReceive, unwrapHistoryTransactions } = await import('../src/bun/activity-history')
+const { deriveHistoryQueries, rebuildActivityHistory, clearHistoryQueryCache, verifiedNativeReceive, unwrapHistoryTransactions, unwrapHistory } = await import('../src/bun/activity-history')
 const ltc = CHAINS.find(chain => chain.id === 'litecoin')!
 const bitcoin = CHAINS.find(chain => chain.id === 'bitcoin')!
 const wallet = { getPublicKeys: async (paths: any[]) => paths.map(path => ({ xpub: `${path.scriptType}:${path.addressNList[0] - 0x80000000}:${path.addressNList[2] - 0x80000000}` })) }
@@ -63,3 +63,19 @@ test('partial, stale and malformed history cannot count as a fresh payment scan'
     expect(() => unwrapHistoryTransactions({ data })).toThrow('incomplete or stale')
   }
 })
+
+test('KEEPKEY-207: partial history keeps its transactions and says it is partial; malformed history still throws', () => {
+  const tx = { txid: 'a' }
+  expect(unwrapHistory({ data: { histories: [{ transactions: [tx] }] } })).toEqual({ txs: [tx], partial: false })
+  for (const data of [{ success: false, histories: [{ transactions: [tx] }] }, { meta: { degraded: true }, histories: [{ transactions: [tx] }] },
+    { meta: { staleChains: ['ltc'] }, histories: [{ transactions: [tx] }] }, { data: { histories: [{ transactions: [tx] }], meta: { degraded: true } } },
+    { histories: [{ transactions: [tx], fresh: false }] }, { histories: [{ transactions: [tx], isStale: true }] }, { histories: [{ transactions: [tx], loading: true }] }]) {
+    expect(unwrapHistory({ data })).toEqual({ txs: [tx], partial: true })
+  }
+  // A failed query with no list: partial, nothing to keep.
+  expect(unwrapHistory({ data: { histories: [{ error: 'upstream failed' }] } })).toEqual({ txs: [], partial: true })
+  for (const data of [{}, { histories: [] }, { histories: [{}] }, { success: false, histories: [] }, { histories: [{ transactions: [] }, { transactions: [] }] }]) {
+    expect(() => unwrapHistory({ data })).toThrow('incomplete or stale')
+  }
+})
+
