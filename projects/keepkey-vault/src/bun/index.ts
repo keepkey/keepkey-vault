@@ -304,7 +304,8 @@ import { zcashNu7SupportError, ZCASH_NU7_MIN_FIRMWARE } from '../shared/zcash-nu
 import { EmulatorTransportDelegate } from './emulator-transport'
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { readPioneerTokenBalance } from "./txbuilder/evm"
-import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
+import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed, rememberedOrchardFvk } from "./txbuilder/zcash-shielded"
+import { ownZcashUnifiedAddress } from "./zcash-own-address"
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
 import { setMoneroEmulatorEnabled, listEmulatorBuilds } from "./emulator-library"
 import { createMoneroVault, moneroHiddenWalletStatus } from "./monero-vault"
@@ -6832,6 +6833,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								...(isXpub ? { scriptType: p.scriptType, replacesLabel: `${p.symbol} (xpub)` } : {}),
 							})
 						}
+						// The Zcash unified address the device already gave the sidecar, only when its viewing key is
+						// this wallet's (the sidecar keeps the last loaded key, which may be another wallet's).
+						const unified = ownZcashUnifiedAddress({
+							cached: getCachedFvk(),
+							remembered: engine.currentSeedEthAddress ? rememberedOrchardFvk(engine.currentSeedEthAddress) : null,
+							networkId: chainById.get('zcash-shielded')?.networkId,
+						})
+						if (unified) own.push(unified)
 						const insertedOwn = syncOwnAddressBook(abScope, own)
 						if (insertedOwn > 0) { try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ } }
 					}

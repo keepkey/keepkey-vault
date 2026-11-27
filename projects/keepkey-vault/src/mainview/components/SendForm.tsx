@@ -12,6 +12,7 @@ import { useFiat } from "../lib/fiat-context"
 import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
 import { AddressBookPicker } from "./AddressBookPicker"
+import { isTransparentZcashRecipient } from "../lib/zcash-send-recipients"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { SaveRecipientDialog } from "./SaveRecipientDialog"
 import { DocsLink } from "./DocsLink"
@@ -1313,7 +1314,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 					chainFamily={chain.chainFamily}
 					assetCaip={activeCaip}
 					// This form spends transparent ZEC; shielded recipients use the shielded balance selector.
-					entryFilter={chain.id === 'zcash' ? (e) => /^(t1|t3|tex1)/i.test(e.address.trim()) : undefined}
+					entryFilter={chain.id === 'zcash' ? (e) => isTransparentZcashRecipient(e.address) : undefined}
 					onSelect={(e) => { setRecipient(e.address); promptedAddressRef.current = e.address; setShowAddressBook(false) }}
 					onClose={() => setShowAddressBook(false)}
 				/>

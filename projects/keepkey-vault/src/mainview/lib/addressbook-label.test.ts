@@ -19,3 +19,9 @@ test("translates the seeded Zcash transparent-address default", () => {
 	expect(addressBookLabel({ kind: "own", label: "My ZEC transparent address" }, t)).toBe("addressbook:ownTransparent:ZEC")
 	expect(addressBookLabel({ kind: "external", label: "My ZEC transparent address" }, t)).toBe("My ZEC transparent address")
 })
+
+test("translates the seeded Zcash unified-address default (KEEPKEY-180)", () => {
+	expect(addressBookLabel({ kind: "own", label: "My ZEC unified address" }, t)).toBe("addressbook:ownUnified:ZEC")
+	expect(addressBookLabel({ kind: "external", label: "My ZEC unified address" }, t)).toBe("My ZEC unified address")
+	expect(addressBookLabel({ kind: "own", label: "Shielded savings" }, t)).toBe("Shielded savings")
+})

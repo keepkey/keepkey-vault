@@ -32,6 +32,7 @@
 	"ownWallet": "Ví của tôi",
 	"ownSymbol": "{{symbol}} của tôi",
 	"ownTransparent": "Địa chỉ minh bạch {{symbol}} của tôi",
+	"ownUnified": "Địa chỉ hợp nhất {{symbol}} của tôi",
 	"edit": "Sửa",
 	"delete": "Xóa",
 	"view": "Xem",

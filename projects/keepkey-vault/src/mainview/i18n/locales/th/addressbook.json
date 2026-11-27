@@ -32,6 +32,7 @@
 	"ownWallet": "กระเป๋าของฉัน",
 	"ownSymbol": "{{symbol}} ของฉัน",
 	"ownTransparent": "ที่อยู่โปร่งใส {{symbol}} ของฉัน",
+	"ownUnified": "ที่อยู่รวม {{symbol}} ของฉัน",
 	"edit": "แก้ไข",
 	"delete": "ลบ",
 	"view": "ดู",

@@ -157,6 +157,16 @@ function savedFvk(key: string): any | null {
 }
 
 /**
+ * The Orchard viewing key already remembered for a wallet, without asking the device: null when that
+ * wallet's key was never exported (this session, or saved for a standard wallet). `identity` is the
+ * wallet's ETH m/44'/60'/0'/0/0 address, the same key exportOrchardFvk remembers it under.
+ */
+export function rememberedOrchardFvk(identity: string, account: number = 0): any | null {
+	const key = `zcash_fvk_${identity.toLowerCase()}_${account}`
+	return rememberedFvks.get(key) ?? (fvkDiskAllowed() ? savedFvk(key) : null)
+}
+
+/**
  * The Orchard viewing key of the connected wallet: remembered, or read from
  * the device. Every export goes through here.
  */

@@ -32,6 +32,7 @@
 	"ownWallet": "Mi billetera",
 	"ownSymbol": "Mi {{symbol}}",
 	"ownTransparent": "Mi dirección transparente de {{symbol}}",
+	"ownUnified": "Mi dirección unificada de {{symbol}}",
 	"edit": "Editar",
 	"delete": "Eliminar",
 	"view": "Ver",

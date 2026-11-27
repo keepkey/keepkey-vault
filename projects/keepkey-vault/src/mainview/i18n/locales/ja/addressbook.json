@@ -32,6 +32,7 @@
 	"ownWallet": "マイウォレット",
 	"ownSymbol": "自分の{{symbol}}",
 	"ownTransparent": "自分の{{symbol}}透明アドレス",
+	"ownUnified": "自分の{{symbol}}統合アドレス",
 	"edit": "編集",
 	"delete": "削除",
 	"view": "表示",
