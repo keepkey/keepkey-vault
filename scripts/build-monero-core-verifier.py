@@ -154,6 +154,12 @@ def build_windows(work, output, jobs, run, artifact, core, boost, sodium, openss
     sodium_object = work / "sodium-verify.o"
     run(["gcc", "-c", "-O2"] + sections + [prefix, "-I" + posix(sodium / "src/libsodium/include/sodium"),
          posix(sodium / "src/libsodium/crypto_verify/verify.c"), "-o", posix(sodium_object)], "sodium-build.log")
+    # cryptonote_format_utils references sodium's siphash. ld64 dead-strips that on macOS;
+    # GNU ld on PE keeps it, so link the same pinned reference source the host adapter uses.
+    siphash_object = work / "sodium-siphash.o"
+    run(["gcc", "-c", "-O2"] + sections + [prefix, "-I" + posix(sodium / "src/libsodium/include/sodium"),
+         posix(sodium / "src/libsodium/crypto_shorthash/siphash24/ref/shorthash_siphash24_ref.c"),
+         "-o", posix(siphash_object)], "sodium-siphash-build.log")
     # Export exactly the verification ABI. With a .def file GNU ld exports nothing else.
     exports = work / "monero_core_verify.def"
     exports.write_text("LIBRARY monero_core_verify.dll\nEXPORTS\n" + "".join("    " + name + "\n" for name in EXPORTS))
@@ -193,7 +199,7 @@ def build_windows(work, output, jobs, run, artifact, core, boost, sodium, openss
         raise RuntimeError("Core build did not produce " + ", ".join(missing[:5]) + "; inspect " + str(work / "core-build.log"))
     command[command.index("-o") + 1] = posix(output)
     command += [posix(stage / name) for name in ["libboost_thread.a", "libboost_chrono.a", "libboost_atomic.a", "libboost_date_time.a"]]
-    command += [posix(sodium_object), posix(exports), posix(windows_unreachable_archive(work, run, sections + [prefix]))]
+    command += [posix(sodium_object), posix(siphash_object), posix(exports),posix(windows_unreachable_archive(work, run, sections + [prefix]))]
     run(command, "final-link.log", cache)
     pe = windows_pe_report(output)
     disallowed = [dll for dll in pe["imports"] if not windows_import_allowed(dll)]
