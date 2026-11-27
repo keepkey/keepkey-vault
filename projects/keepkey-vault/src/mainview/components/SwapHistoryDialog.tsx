@@ -15,6 +15,7 @@ import { getExplorerTxUrl, getExplorerBlockUrl } from "../../shared/chains"
 import type { PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryStats, SwapTrackingStatus } from "../../shared/types"
 import { ProviderBadge } from "./ProviderBadge"
 import { formatEvmFeePaid } from "../lib/evm-fee-display"
+import { getDateLocale } from '../lib/date-locale'
 
 const ExternalLinkIcon = () => (
   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -65,8 +66,8 @@ function formatElapsed(ms: number): string {
 
 function formatDate(ts: number): string {
   const d = new Date(ts)
-  return d.toLocaleDateString(getNumberLocale(), { month: 'short', day: 'numeric', year: 'numeric' }) +
-    ' ' + d.toLocaleTimeString(getNumberLocale(), { hour: '2-digit', minute: '2-digit', hour12: false })
+  return d.toLocaleDateString(getDateLocale(), { month: 'short', day: 'numeric', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString(getDateLocale(), { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 /** Open the raw pendingTx JSON (everything Pioneer has on a swap) in the browser. */

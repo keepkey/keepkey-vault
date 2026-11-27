@@ -80,5 +80,22 @@
 	"recipientContractNote": "Questo indirizzo è uno smart contract. Assicurati che possa ricevere {{symbol}}: i fondi inviati a un contratto che non li gestisce possono andare persi.",
 	"customGasPriceTooHigh": "Il prezzo del gas è 10 volte o più il prezzo della rete ({{gwei}} gwei). Abbassalo o usa un'impostazione predefinita.",
 	"customGasPriceTooLow": "Il prezzo del gas è inferiore alla commissione base della rete (~{{gwei}} gwei). La transazione non verrebbe mai confermata.",
-	"gasPriceUnavailable": "Impossibile caricare il prezzo del gas della rete, quindi Desktop non indovinerà una commissione. Riprova tra un momento."
+	"amountBelowDust": "L'importo è inferiore al minimo accettato dalla rete. Invia almeno {{minimum}} {{symbol}}.",
+	"maxBelowDust": "Dopo le commissioni, l'importo da inviare è inferiore al minimo accettato dalla rete ({{minimum}} {{symbol}}). Aggiungi fondi o riduci la commissione.",
+	"gasPriceUnavailable": "Impossibile caricare il prezzo del gas della rete, quindi Desktop non indovinerà una commissione. Riprova tra un momento.",
+	"insufficientAmountAndFee": "Saldo {{symbol}} insufficiente per l'importo e la commissione di rete.",
+	"insufficientAfterFees": "Dopo la commissione di rete non resta nulla da inviare.",
+	"insufficientToken": "Saldo del token insufficiente per questo importo.",
+	"insufficientTokenAmount": "Saldo insufficiente: {{available}} disponibile, {{requested}} richiesto.",
+	"insufficientGas": "{{symbol}} insufficiente per la commissione di rete: hai {{have}} {{symbol}} e servono circa {{need}} {{symbol}}.",
+	"insufficientGasForMax": "Il saldo non copre la commissione di rete.",
+	"insufficientAmountAndGas": "{{symbol}} insufficiente: hai {{have}} {{symbol}} e servono {{need}} {{symbol}}, commissione di rete inclusa.",
+	"insufficientAmount": "{{symbol}} insufficiente: hai {{have}} {{symbol}} e servono {{need}} {{symbol}}.",
+	"insufficientAmountAndFeeNoSymbol": "Il saldo non copre l'importo più la commissione di rete. Invia un importo minore o riduci la commissione.",
+	"insufficientDogeMinimumFee": "DOGE insufficiente per la commissione di rete minima di 1 DOGE.",
+	"insufficientZcashMinimumFee": "ZEC insufficiente per la commissione di rete minima di {{fee}} ZEC.",
+	"insufficientZcashMinimumFeeExact": "ZEC insufficiente per la commissione di rete minima di {{fee}} ZEC. Prova a inviare un importo leggermente minore.",
+	"insufficientXrpReserve": "XRP insufficiente dopo la riserva del conto e la commissione di rete.",
+	"insufficientTronMaxReserve": "TRX insufficiente per inviare il massimo dopo aver riservato {{reserve}} TRX per le commissioni di rete.",
+	"exceedsBalanceWithFee": "L'importo più la commissione di rete ({{fee}} {{symbol}}) supera il saldo disponibile ({{balance}} {{symbol}})."
 }

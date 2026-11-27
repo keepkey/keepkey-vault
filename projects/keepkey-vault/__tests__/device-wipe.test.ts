@@ -372,15 +372,15 @@ describe('wiring', () => {
     expect(wipeBranch).toContain('!this.wipeInProgress')
     expect(wipeBranch).toContain('connection !== this.wipeDeferredWallet')
     expect(wipeBranch).toContain('this.cachedFeatures?.deviceId')
-    expect(wipeBranch).toContain('if (sameDevice)')
-    expect(wipeBranch).toContain('this.wallet === connection')
+    expect(wipeBranch).toContain('if (!sameDevice) this.cancelDeferredWipe()')
+    expect(wipeBranch).toContain('this.wallet !== connection')
     expect(wipeBranch).toContain('this.wipeDevice()')
     expect(wipeBranch).not.toContain('this.promptPin()')
   })
 
   test('a PIN request on the deferring connection drops the deferred wipe (needs a new click)', () => {
     const listener = engine.slice(engine.indexOf('transport.on(String(Messages.MessageType.MESSAGETYPE_PINMATRIXREQUEST)'), engine.indexOf("this.emit('pin-request'"))
-    expect(listener).toContain('this.wipeOnReconnect = null')
+    expect(listener).toContain('this.cancelDeferredWipe()')
   })
 
   test('nothing else talks to the device during a wipe: PIN prompt, syncState, USB attach', () => {
@@ -430,7 +430,7 @@ describe('wiring', () => {
     const sendPin = engine.slice(engine.indexOf('  async sendPin(pin: string) {'), engine.indexOf('  async sendPin(pin: string) {') + 600)
     expect(sendPin).toContain('this.setPinPromptOpen(false)')
     const app = readFileSync(path.join(import.meta.dir, '../src/mainview/App.tsx'), 'utf8')
-    expect(app).toContain('deviceAsking={deviceState.pinPromptOpen ?? true}')
+    expect(app).toContain('deviceAsking={!!pinRequestType && (deviceState.pinPromptOpen ?? true)}')
     const pad = readFileSync(path.join(import.meta.dir, '../src/mainview/components/device/PinEntry.tsx'), 'utf8')
     expect(pad).toContain('if (!deviceAsking) return')
     expect(pad).toContain('disabled={pin.length >= 9 || !deviceAsking}')

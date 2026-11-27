@@ -1005,20 +1005,41 @@ export class WalletConnectManager {
   private async rpcCall(chainId: number, method: string, params: any[]): Promise<any> {
     const rpcUrl = CHAIN_RPC[chainId]
     if (!rpcUrl) throw new Error(`No RPC for chain ${chainId}`)
-    const resp = await fetch(rpcUrl, {
+    // A lost broadcast response may already represent an accepted transaction.
+    const fallback = chainId === 1 && method !== 'eth_sendRawTransaction' ? 'https://ethereum-rpc.publicnode.com' : undefined
+    const request = (url: string) => fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
       signal: AbortSignal.timeout(20_000),
     })
-    if (!resp.ok) throw new Error(`RPC ${method} failed (HTTP ${resp.status})`)
-    let json: any
-    try { json = await resp.json() }
-    catch { throw new Error(`RPC ${method} returned a non-JSON response (HTTP ${resp.status}). Try again later.`) }
-    if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error(`RPC ${method} returned an invalid response`)
-    if (json.error) throw new Error(json.error.message)
-    if (!Object.prototype.hasOwnProperty.call(json, 'result')) throw new Error(`RPC ${method} returned no result`)
-    return json.result
+    const endpoints = fallback ? [rpcUrl, fallback] : [rpcUrl]
+    for (const endpoint of endpoints) {
+      const canRetry = endpoint !== endpoints[endpoints.length - 1]
+      let resp: Response
+      try {
+        resp = await request(endpoint)
+      } catch (error) {
+        if (canRetry) continue
+        throw error
+      }
+      if (!resp.ok) {
+        await resp.body?.cancel()
+        if (canRetry && (resp.status === 429 || resp.status >= 500)) continue
+        throw new Error(`RPC ${method} failed (HTTP ${resp.status})`)
+      }
+      let json: any
+      try { json = await resp.json() }
+      catch {
+        if (canRetry) continue
+        throw new Error(`RPC ${method} returned a non-JSON response (HTTP ${resp.status}). Try again later.`)
+      }
+      if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error(`RPC ${method} returned an invalid response`)
+      if (json.error) throw new Error(json.error.message)
+      if (!Object.prototype.hasOwnProperty.call(json, 'result')) throw new Error(`RPC ${method} returned no result`)
+      return json.result
+    }
+    throw new Error(`No available RPC for chain ${chainId}`)
   }
 
   // ── Signing implementations ─────────────────────────────────────

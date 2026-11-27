@@ -5,6 +5,7 @@
  * Returns object ready for hdwallet's rippleSignTx().
  */
 import type { ChainDef } from '../../shared/chains'
+import { balanceErrorMessage } from '../../shared/send-balance-errors'
 
 const TAG = '[txbuilder:xrp]'
 export const XRP_FEE_DROPS = 1000n
@@ -27,10 +28,10 @@ async function maxDrops(account: any): Promise<bigint> {
       const base = uint(ledger?.reserve_base, 'base reserve'), increment = uint(ledger?.reserve_inc, 'owner reserve')
       if (base <= 0n || increment <= 0n) continue
       const available = balance - base - owners * increment - XRP_FEE_DROPS
-      if (available <= 0n) throw new Error('Insufficient XRP after account reserve and transaction fee')
+      if (available <= 0n) throw new Error(balanceErrorMessage('xrpReserve'))
       return available
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith('Insufficient XRP')) throw error
+      if (error instanceof Error && error.message === balanceErrorMessage('xrpReserve')) throw error
     }
   }
   throw new Error('Cannot verify XRP account reserves. No transaction was built.')
@@ -100,7 +101,7 @@ export async function buildXrpTx(
   if (drops <= 0n) throw new Error('Amount must be greater than zero')
   // Ordinary payments must preserve reserves just like MAX. Missing account
   // balance/owner data fails closed in maxDrops instead of skipping the guard.
-  if (!isMax && drops > await maxDrops(accountInfo)) throw new Error('Insufficient XRP after account reserve and transaction fee')
+  if (!isMax && drops > await maxDrops(accountInfo)) throw new Error(balanceErrorMessage('xrpReserve'))
 
   // 4. Build unsigned tx
   const msg = {

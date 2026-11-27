@@ -2,6 +2,7 @@ import { Box, Text } from '@chakra-ui/react'
 import type { MoneroStatus } from '../../shared/types'
 import { useUiTranslation } from '../i18n/ui'
 import { getNumberLocale } from '../lib/number-locale'
+import { getDateLocale } from '../lib/date-locale'
 
 export function moneroWalletOpenError(status:MoneroStatus|null):string|undefined {
  return status?.connection?.state==='failed'&&status.connection.attempts.some(node=>node.state==='responding')?status.error:undefined
@@ -14,7 +15,7 @@ export function MoneroConnectionDetails({status}:{status:MoneroStatus|null}) {
  const current=info.attempts.find(node=>node.url===info.activeNode)
  const connected=info.state==='connected'||info.state==='scanning'
  const walletOpenError=moneroWalletOpenError(status)
- const time=(value:string)=>new Date(value).toLocaleTimeString(getNumberLocale())
+ const time=(value:string)=>new Date(value).toLocaleTimeString(getDateLocale())
  const state=info.state==='checking'?uiText('Checking remote node…'):info.state==='switching'?uiText('Trying another remote node…')
   :info.state==='waiting'?uiText('No remote node is responding. Automatic retry is scheduled.')
   :info.state==='failed'?(walletOpenError||uiText('The current node did not respond.'))

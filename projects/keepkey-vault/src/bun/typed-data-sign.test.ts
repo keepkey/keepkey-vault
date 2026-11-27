@@ -38,7 +38,7 @@ function packets({ type, body }: Frame): Uint8Array[] {
 }
 
 /** Firmware 7.16.0 with CAPABILITY_EIP712_CHUNKED_VALUES: asks for SafeTx.data in 1 KB chunks. */
-function device716() {
+function device716(legacy = false) {
   const frames: Frame[] = []
   const outbox: Uint8Array[] = []
   let pending: number[] = []
@@ -46,12 +46,18 @@ function device716() {
   const respond = (host: Frame): Frame => {
     if (host.type === MT.MESSAGETYPE_GETFEATURES) {
       const f = new Messages.Features()
-      f.setVendor('keepkey.com'); f.setMajorVersion(7); f.setMinorVersion(16); f.setPatchVersion(0)
-      f.setCapabilitiesList([Messages.Features.Capability.CAPABILITY_EIP712_CHUNKED_VALUES])
+      f.setVendor('keepkey.com'); f.setMajorVersion(7); f.setMinorVersion(legacy ? 14 : 16); f.setPatchVersion(legacy ? 1 : 0)
+      if (!legacy) f.setCapabilitiesList([Messages.Features.Capability.CAPABILITY_EIP712_CHUNKED_VALUES])
       return { type: MT.MESSAGETYPE_FEATURES, body: f.serializeBinary() }
     }
     if (host.type === MT.MESSAGETYPE_CLEARSESSION) return { type: MT.MESSAGETYPE_SUCCESS, body: new Messages.Success().serializeBinary() }
-    if (host.type === MT.MESSAGETYPE_ETHEREUMSIGNTYPEDDATA || offset + 1024 < DATA_LENGTH) {
+    if (legacy && host.type === MT.MESSAGETYPE_ETHEREUMSIGNTYPEDDATA) {
+      const failure = new Messages.Failure()
+      failure.setCode(1)
+      failure.setMessage('Unknown message')
+      return { type: MT.MESSAGETYPE_FAILURE, body: failure.serializeBinary() }
+    }
+    if (!legacy && (host.type === MT.MESSAGETYPE_ETHEREUMSIGNTYPEDDATA || offset + 1024 < DATA_LENGTH)) {
       if (host.type !== MT.MESSAGETYPE_ETHEREUMSIGNTYPEDDATA) offset += 1024
       const req = new Ethereum.EthereumTypedDataValueRequest()
       req.setMemberPathList([1, 2])
@@ -121,4 +127,22 @@ describe('typed data after ClearSession on 7.16 (eth-multisend-4900-corpus leg)'
     expect(direct).toEqual([])
     for (const f of ['rest-api.ts', 'index.ts']) expect(readFileSync(join(__dirname, f), 'utf8')).toContain('signTypedDataWithFeatures(')
   })
+})
+
+test('7.14.1 signs Hyperliquid ApproveAgent through the legacy typed hash request', async () => {
+  const typedData = {
+    domain: { name: 'HyperliquidSignTransaction', version: '1', chainId: 42161, verifyingContract: '0x0000000000000000000000000000000000000000' },
+    primaryType: 'HyperliquidTransaction:ApproveAgent',
+    types: { 'HyperliquidTransaction:ApproveAgent': [
+      { name: 'hyperliquidChain', type: 'string' }, { name: 'agentAddress', type: 'address' },
+      { name: 'agentName', type: 'string' }, { name: 'nonce', type: 'uint64' },
+    ] },
+    message: { hyperliquidChain: 'Mainnet', agentAddress: '0x1111111111111111111111111111111111111111', agentName: 'QA agent', nonce: 1700000000000 },
+  }
+  const { wallet, frames } = device716(true)
+  const result = await signTypedDataWithFeatures(wallet, { addressNList: PATH, typedData })
+  expect(result.signature).toBe('0x' + '33'.repeat(65))
+  expect(frames.at(-1)?.type).toBe(MT.MESSAGETYPE_ETHEREUMSIGNTYPEDHASH)
+  const hashes = Ethereum.EthereumSignTypedHash.deserializeBinary(frames.at(-1)!.body)
+  expect(Buffer.from(hashes.getMessageHash_asU8()).toString('hex')).toBe('c5b56400c8cd0456343cf6b965eafd00b7cf3be1359e57586ba528da1c9a31de')
 })

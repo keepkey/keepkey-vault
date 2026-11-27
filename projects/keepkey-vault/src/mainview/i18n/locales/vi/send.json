@@ -80,5 +80,22 @@
 	"recipientContractNote": "Địa chỉ này là một hợp đồng thông minh. Hãy chắc chắn nó nhận được {{symbol}}: tiền gửi đến hợp đồng không xử lý được có thể bị mất.",
 	"customGasPriceTooHigh": "Giá gas gấp 10 lần trở lên so với giá mạng ({{gwei}} gwei). Hãy giảm xuống hoặc dùng mức đặt sẵn.",
 	"customGasPriceTooLow": "Giá gas thấp hơn phí cơ bản của mạng (~{{gwei}} gwei). Giao dịch sẽ không bao giờ được xác nhận.",
-	"gasPriceUnavailable": "Không tải được giá gas của mạng nên Desktop sẽ không đoán phí. Hãy thử lại sau giây lát."
+	"amountBelowDust": "Số tiền thấp hơn mức tối thiểu mạng chấp nhận. Hãy gửi ít nhất {{minimum}} {{symbol}}.",
+	"maxBelowDust": "Sau khi trừ phí, số tiền gửi thấp hơn mức tối thiểu mạng chấp nhận ({{minimum}} {{symbol}}). Hãy nạp thêm hoặc giảm phí.",
+	"gasPriceUnavailable": "Không tải được giá gas của mạng nên Desktop sẽ không đoán phí. Hãy thử lại sau giây lát.",
+	"insufficientAmountAndFee": "Không đủ {{symbol}} cho số tiền và phí mạng.",
+	"insufficientAfterFees": "Sau khi trừ phí mạng thì không còn gì để gửi.",
+	"insufficientToken": "Số dư token không đủ cho số tiền này.",
+	"insufficientTokenAmount": "Số dư không đủ: khả dụng {{available}}, yêu cầu {{requested}}.",
+	"insufficientGas": "Không đủ {{symbol}} cho phí mạng: bạn có {{have}} {{symbol}} và cần khoảng {{need}} {{symbol}}.",
+	"insufficientGasForMax": "Số dư không đủ trả phí mạng.",
+	"insufficientAmountAndGas": "Không đủ {{symbol}}: bạn có {{have}} {{symbol}} và cần {{need}} {{symbol}}, đã gồm phí mạng.",
+	"insufficientAmount": "Không đủ {{symbol}}: bạn có {{have}} {{symbol}} và cần {{need}} {{symbol}}.",
+	"insufficientAmountAndFeeNoSymbol": "Số dư không đủ cho số tiền cộng phí mạng. Hãy gửi số tiền nhỏ hơn hoặc giảm phí.",
+	"insufficientDogeMinimumFee": "Không đủ DOGE để trả phí mạng tối thiểu 1 DOGE.",
+	"insufficientZcashMinimumFee": "Không đủ ZEC để trả phí mạng tối thiểu {{fee}} ZEC.",
+	"insufficientZcashMinimumFeeExact": "Không đủ ZEC để trả phí mạng tối thiểu {{fee}} ZEC. Hãy thử gửi số tiền nhỏ hơn một chút.",
+	"insufficientXrpReserve": "Không đủ XRP sau khi trừ dự trữ tài khoản và phí mạng.",
+	"insufficientTronMaxReserve": "Không đủ TRX để gửi tối đa sau khi giữ lại {{reserve}} TRX cho phí mạng.",
+	"exceedsBalanceWithFee": "Số tiền cộng phí mạng ({{fee}} {{symbol}}) vượt quá số dư khả dụng ({{balance}} {{symbol}})."
 }

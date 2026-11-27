@@ -42,10 +42,10 @@ const click = async (el: Element) => { await act(async () => { (el as HTMLElemen
 // Pick Base.
 await click(buttons()[0])
 await click(buttons().find(b => b.textContent?.includes('Base'))!)
-const input = () => container.querySelectorAll('input')[0] as HTMLInputElement
-const type = async (value: string) => {
+const input = (i = 0) => container.querySelectorAll('input')[i] as HTMLInputElement
+const type = async (value: string, i = 0) => {
   const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!
-  await act(async () => { setter.call(input(), value); input().dispatchEvent(new Event('input', { bubbles: true })) })
+  await act(async () => { setter.call(input(i), value); input(i).dispatchEvent(new Event('input', { bubbles: true })) })
   await settle(350) // past the own-address lookup debounce
 }
 const state = () => ({
@@ -77,6 +77,16 @@ await type('Alice.ETH')
 await click(buttons().find(b => b.textContent === 'addAddress')!)
 await settle()
 out.ensSaved = saved.at(-1)
+// KEEPKEY-176: the name field stays editable for an ENS contact and its value is sent.
+await act(async () => root.render(<AddAddressDialog key="ens-named" onClose={() => {}} />))
+await click(buttons()[0])
+await click(buttons().find(b => b.textContent?.includes('Base'))!)
+await type('Alice.ETH')
+out.ensLabel = { disabled: input(1).disabled, placeholder: input(1).placeholder }
+await type('Alice work', 1)
+await click(buttons().find(b => b.textContent === 'addAddress')!)
+await settle()
+out.ensNamed = saved.at(-1)
 await act(async () => root.unmount())
 console.log(JSON.stringify(out))
 process.exit(0)

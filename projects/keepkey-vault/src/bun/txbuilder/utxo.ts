@@ -6,6 +6,8 @@
  */
 import coinSelect from 'coinselect'
 import { selectZcashCoins } from './zcash-coinselect'
+import { changeDustLimit, foldDustChange, outputDustLimit } from './utxo-dust'
+import { dustErrorMessage, formatBaseUnits } from '../../shared/utxo-dust-errors'
 // @ts-ignore — coinselect/split has no types
 import coinSelectSplit from 'coinselect/split'
 import { bech32, bech32m } from '@scure/base'
@@ -18,6 +20,8 @@ import type { BtcBackend } from '../btc-backend'
 import { utxoDiscoveryKey } from '../btc-backend/types'
 import { filterSpendableZcashUtxos, summarizeZcashMaturity, ZCASH_MIN_CONFIRMATIONS } from '../../shared/zcash-maturity'
 import { ZCASH_NU7_ACTIVATION_HEIGHT, ZCASH_NU7_BRANCH_ID, ZCASH_V6_VERSION_GROUP_ID } from '../../shared/zcash-nu7'
+import { isAccountIndex, parseBip32PathStrict } from '../../shared/bip32-account'
+import { balanceErrorMessage } from '../../shared/send-balance-errors'
 
 /** BTC mainnet — the ONLY UTXO chain that routes to a self-host node; every other
  *  coin (LTC/DOGE/BCH/Dash/Zcash) stays on Pioneer. */
@@ -110,17 +114,6 @@ function parseDecimalToInt(amount: string, decimals: number): number {
 
 const TAG = '[txbuilder:utxo]'
 
-// BIP32 path segment to addressNList
-function bip32ToAddressNList(path: string): number[] {
-  return path
-    .replace('m/', '')
-    .split('/')
-    .map((seg) => {
-      const hardened = seg.endsWith("'")
-      const index = parseInt(seg.replace("'", ''), 10)
-      return hardened ? index + 0x80000000 : index
-    })
-}
 
 // Hardcoded fee overrides for chains where API is unreliable
 const HARDCODED_FEES: Record<string, { slow: number; average: number; fast: number }> = {
@@ -153,31 +146,42 @@ const PURPOSE_TO_SCRIPT: Record<number, string> = {
   44: 'p2pkh', 49: 'p2sh-p2wpkh', 84: 'p2wpkh', 86: 'p2tr',
 }
 
+// Convert a segwit address of any chain (bc1, ltc1, dgb1…) to its witness
+// scriptPubKey hex. Bech32 is case-insensitive: an all-upper-case address, as QR
+// codes carry it, decodes the same; a mixed-case one is invalid.
+export function witnessScriptPubKeyHex(address: string): string | undefined {
+  try {
+    // BIP173 v0 uses Bech32; BIP350 v1+ (including P2TR) uses Bech32m.
+    // Decode with both, then enforce the checksum variant required by the
+    // witness version so a v1 address with an old Bech32 checksum is rejected.
+    let decoded: { prefix: string; words: number[] }
+    let isBech32m = false
+    try {
+      decoded = bech32.decode(address)
+    } catch {
+      decoded = bech32m.decode(address)
+      isBech32m = true
+    }
+    const version = decoded.words[0]
+    if (version == null || version < 0 || version > 16) return undefined
+    if ((version === 0 && isBech32m) || (version > 0 && !isBech32m)) return undefined
+    const program = (isBech32m ? bech32m : bech32).fromWords(decoded.words.slice(1))
+    if (program.length < 2 || program.length > 40) return undefined
+    if (version === 0 && program.length !== 20 && program.length !== 32) return undefined
+    const hex = Buffer.from(Uint8Array.from(program)).toString('hex')
+    const versionOpcode = version === 0 ? '00' : (0x50 + version).toString(16).padStart(2, '0')
+    return `${versionOpcode}${program.length.toString(16).padStart(2, '0')}${hex}`
+  } catch {
+    return undefined
+  }
+}
+
 // Convert a Bitcoin address to its scriptPubKey hex (for matching UTXOs by script)
 export function addressToScriptPubKeyHex(address: string): string | undefined {
   try {
     if (address.startsWith('bc1') || address.startsWith('tb1') ||
         address.startsWith('ltc1') || address.startsWith('tltc1')) {
-      // BIP173 v0 uses Bech32; BIP350 v1+ (including P2TR) uses Bech32m.
-      // Decode with both, then enforce the checksum variant required by the
-      // witness version so a v1 address with an old Bech32 checksum is rejected.
-      let decoded: { prefix: string; words: number[] }
-      let isBech32m = false
-      try {
-        decoded = bech32.decode(address)
-      } catch {
-        decoded = bech32m.decode(address)
-        isBech32m = true
-      }
-      const version = decoded.words[0]
-      if (version == null || version < 0 || version > 16) return undefined
-      if ((version === 0 && isBech32m) || (version > 0 && !isBech32m)) return undefined
-      const program = (isBech32m ? bech32m : bech32).fromWords(decoded.words.slice(1))
-      if (program.length < 2 || program.length > 40) return undefined
-      if (version === 0 && program.length !== 20 && program.length !== 32) return undefined
-      const hex = Buffer.from(Uint8Array.from(program)).toString('hex')
-      const versionOpcode = version === 0 ? '00' : (0x50 + version).toString(16).padStart(2, '0')
-      return `${versionOpcode}${program.length.toString(16).padStart(2, '0')}${hex}`
+      return witnessScriptPubKeyHex(address)
     }
     // Zcash t1... (P2PKH) and t3... (P2SH) — 2-byte version prefix
     if (address.startsWith('t1') || address.startsWith('t3')) {
@@ -580,8 +584,8 @@ export async function buildUtxoTx(
         `so the ${total / 1e8} ${chain.symbol} found so far may not be all of it. Try again in a moment.`,
       )
     }
-    if (total < satoshis) throw new Error(`Insufficient funds: have ${total / 1e8}, need ${satoshis / 1e8} ${chain.symbol}`)
-    throw new Error('Coin selection failed (possibly high fees)')
+    if (total < satoshis) throw new Error(balanceErrorMessage('amount', { have: total / 1e8, need: satoshis / 1e8, symbol: chain.symbol }))
+    throw new Error(balanceErrorMessage('amountAndUtxoFee'))
   }
 
   let { inputs, outputs, fee } = result
@@ -610,7 +614,7 @@ export async function buildUtxoTx(
         outputs[spendIdx].value -= increase
         fee = 100000000
       } else {
-        throw new Error(`Insufficient DOGE to cover minimum 1 DOGE network fee`)
+        throw new Error(balanceErrorMessage('dogeMinimumFee'))
       }
     }
     console.log(`${TAG} DOGE: enforced minimum fee = ${fee} sats (${fee / 1e8} DOGE)`)
@@ -648,12 +652,40 @@ export async function buildUtxoTx(
           outputs[spendIdx].value -= increase
           fee = zip317Fee
         } else {
-          throw new Error(`Insufficient ZEC to cover ZIP-317 minimum fee (${zip317Fee} zats for ${logicalActions} actions)`)
+          throw new Error(balanceErrorMessage('zcashMinimumFee', { zats: zip317Fee, actions: logicalActions }))
         }
       } else {
-        throw new Error(`Insufficient ZEC to cover ZIP-317 minimum fee (${zip317Fee} zats for ${logicalActions} actions). Try sending a slightly smaller amount.`)
+        throw new Error(balanceErrorMessage('zcashMinimumFeeExact', { zats: zip317Fee, actions: logicalActions }))
       }
       console.log(`${TAG} ZEC: enforced ZIP-317 fee = ${fee} zats (${logicalActions} actions, min ${zip317Fee})`)
+    }
+  }
+
+  // Change below the node's dust limit makes the whole tx non-standard, and
+  // coinselect's own threshold (148 × rate) sits under it at low rates. Zcash
+  // selection already keeps change at 5000 zats or more.
+  if (chain.id !== 'zcash') {
+    const dustLimit = changeDustLimit(chain.id, scriptType)
+    const folded = foldDustChange(outputs, fee, dustLimit)
+    if (folded.folded > 0) {
+      console.log(`${TAG} Change of ${formatBaseUnits(folded.folded, chain.decimals)} ${chain.symbol} is under the ${formatBaseUnits(dustLimit, chain.decimals)} ${chain.symbol} dust limit — added to the fee`)
+      outputs = folded.outputs
+      fee = folded.fee
+    }
+
+    // A spend output under the limit cannot be folded away: the node would
+    // refuse the signed tx at broadcast. Coinselect never checks it for exact
+    // sends, and split (MAX) only checks 148 × rate. Refuse before signing.
+    for (const output of outputs) {
+      if (!output.address) continue
+      // addressToScriptPubKeyHex reads segwit only for lower-case bc1/tb1/ltc1/tltc1;
+      // a DigiByte dgb1… or an upper-case address from a QR code would get the
+      // larger P2PKH limit and a valid send would be refused (KEEPKEY-162).
+      const script = addressToScriptPubKeyHex(output.address) ?? witnessScriptPubKeyHex(output.address)
+      const limit = outputDustLimit(chain.id, script)
+      if (output.value < limit) {
+        throw new Error(dustErrorMessage(isMax ? 'maxAfterFees' : 'amount', formatBaseUnits(limit, chain.decimals), chain.symbol))
+      }
     }
   }
 
@@ -699,9 +731,10 @@ export async function buildUtxoTx(
           // Change address index — only from primary xpub's change paths
           if (qXpub === primaryXpub && token.path && token.transfers > 0) {
             const parts = token.path.split('/')
-            if (parts.length === 6 && parts[4] === '1') {
-              const idx = parseInt(parts[5], 10)
-              if (!isNaN(idx) && idx > maxUsed) maxUsed = idx
+            // A hardened or out-of-range segment is not a real change address; skip it (audit v6 H8).
+            if (parts.length === 6 && parts[4] === '1' && /^\d+$/.test(parts[5])) {
+              const idx = Number(parts[5])
+              if (isAccountIndex(idx) && idx > maxUsed) maxUsed = idx
             }
           }
         }
@@ -777,10 +810,13 @@ export async function buildUtxoTx(
     throw new Error(`Change index ${changeAddressIndex} is more than 10 past the highest used change address (${discoveredChangeIndex - 1}); refusing`)
   }
 
+  // The change index comes from the balance server. From 2^31 up it would become a hardened element or wrap to an
+  // earlier address, so refuse instead of guessing (audit v6 H8).
+  if (!isAccountIndex(changeAddressIndex)) throw new Error(`Change index ${changeAddressIndex} is out of range; refusing`)
   // Change address path — use correct account index (from accountPath or default 0)
   const changeAddressNList = accountPath
     ? [...accountPath, 1, changeAddressIndex]
-    : bip32ToAddressNList(`m/${purpose}'/${coinType}'/0'/1/${changeAddressIndex}`)
+    : parseBip32PathStrict(`m/${purpose}'/${coinType}'/0'/1/${changeAddressIndex}`)
 
   // 5. Prepare inputs/outputs for hdwallet
   const preparedInputs = inputs.map((input: any) => {
@@ -789,7 +825,7 @@ export async function buildUtxoTx(
     const inputAccountPath: number[] | undefined = input._sourceAccountPath || accountPath
     let addressNList: number[]
     if (input.path) {
-      const rawNList = bip32ToAddressNList(input.path)
+      const rawNList = parseBip32PathStrict(input.path)
       if (inputAccountPath && rawNList.length === 5) {
         // Blockbook returns account-0 paths — rewrite first 3 segments to the
         // UTXO's own source account path (correct for both single- and multi-xpub)

@@ -2055,7 +2055,7 @@ export function getPriorEvmCalls(from: string, to: string, chainId: number): { c
   }
 }
 
-const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast', 'shield', 'unshield'])
+const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast', 'shield', 'unshield', 'contract'])
 
 /** Query api_log entries that have activity_type set + swap_history, merged by timestamp */
 // Collapse two api_log rows describing the SAME on-chain txid into one record
@@ -2123,6 +2123,9 @@ export function dismissActivity(id: string, deviceId?: string, walletId?: string
  *  rule normalizeMeta writes (audit v6 R6). Rows without meta.chainId fall back
  *  to the scan route (`history/<chainId>`), as the chain filter above does. */
 function scanRowFee(meta: any, activityType: string, route: string | null): string | undefined {
+  // Legacy receive rows lack fee ownership. A new scan can confirm that
+  // the wallet paid for an otherwise incoming event, such as a withdrawal.
+  if (activityType === 'receive' && meta?.walletPaidFee !== true) return undefined
   const chainId = meta?.chainId ?? route?.match(/^history\/(.+)$/)?.[1]
   const chain = chainId ? CHAINS.find(c => c.id === chainId) : undefined
   return withNativeTxFee(meta?.fee ?? undefined, activityType, chain)
@@ -2736,7 +2739,7 @@ export function updateSwapHistoryStatus(
     const isFinal = status === 'completed' || status === 'failed' || status === 'refunded'
 
     // Build SET clauses and params together to prevent misalignment
-    const setClauses: Array<{ col: string; value: any }> = [
+    const setClauses: Array<{ col: string; value: any; sql?: string }> = [
       { col: 'status', value: status },
       { col: 'updated_at', value: now },
     ]
@@ -2765,9 +2768,18 @@ export function updateSwapHistoryStatus(
     if (extra?.errorActionable) setClauses.push({ col: 'error_actionable', value: extra.errorActionable })
     if (extra?.errorElapsedMinutes !== undefined) setClauses.push({ col: 'error_elapsed_minutes', value: extra.errorElapsedMinutes })
     if (isFinal) {
-      setClauses.push({ col: 'completed_at', value: extra?.completedAt || now })
+      const completedAt = extra?.completedAt || now
+      setClauses.push({ col: 'completed_at', value: completedAt })
       if (extra?.actualTimeSeconds !== undefined) {
         setClauses.push({ col: 'actual_time_secs', value: extra.actualTimeSeconds })
+      } else if (status === 'completed' || status === 'refunded') {
+        // Settlement paths (NEAR, Midgard, THORNode) finish a swap without a
+        // duration; derive it from the row's own start, keeping one already
+        // stored. A row that already has completed_at (stored before every path
+        // kept a duration) uses it, not this later refresh: SET expressions read
+        // the row as it was. Not for 'failed': a stale-pending timeout is not a duration.
+        setClauses.push({ col: 'actual_time_secs', value: completedAt,
+          sql: 'actual_time_secs = COALESCE(actual_time_secs, MAX(0, CAST(ROUND((COALESCE(completed_at, ?) - created_at) / 1000.0) AS INTEGER)))' })
       }
     }
 
@@ -2777,7 +2789,7 @@ export function updateSwapHistoryStatus(
       : extra?.deviceId
         ? [...setClauses.map(c => c.value), txid, extra.deviceId]
         : [...setClauses.map(c => c.value), txid]
-    const sql = `UPDATE swap_history SET ${setClauses.map(c => `${c.col} = ?`).join(', ')} WHERE ${where}`
+    const sql = `UPDATE swap_history SET ${setClauses.map(c => c.sql ?? `${c.col} = ?`).join(', ')} WHERE ${where}`
 
     db.run(sql, params)
   } catch (e: any) {
@@ -2885,6 +2897,77 @@ export function getSwapHistoryStats(deviceId?: string, walletId?: string): SwapH
 const nativeSymbol = (caip: string | null) => caip && /\/slip44:/.test(caip)
   ? CHAINS.find(c => c.caip.toLowerCase() === caip.toLowerCase())?.symbol : undefined
 
+// A stored JSON column that cannot be read is dropped for that row only. Throwing here would make getSwapHistory return
+// nothing, which empties the whole swap history and stops the tracker from resuming pending swaps (audit v6 H9).
+// The history is polled, so each bad column is reported once per run, with a shortened txid like the tracker's logs.
+const reportedSwapColumns = new Set<string>()
+function warnSwapColumn(row: any, column: string, problem: string) {
+  const key = `${row.txid}:${column}`
+  if (reportedSwapColumns.has(key)) return
+  reportedSwapColumns.add(key)
+  console.warn(`[db] swap_history ${String(row.txid).slice(0, 10)}: ${problem} ${column}, ignored`)
+}
+
+function storedJson(row: any, column: string): unknown {
+  const raw = row[column]
+  if (!raw) return undefined
+  try {
+    return JSON.parse(raw)
+  } catch {
+    warnSwapColumn(row, column, 'unreadable')
+    return undefined
+  }
+}
+
+const isText = (value: unknown): value is string => typeof value === 'string'
+
+/** Payouts as the UI and settlement check use them; entries without a txid, amount and asset are dropped. */
+function storedPayouts(row: any): SwapHistoryRecord['payouts'] {
+  const value = storedJson(row, 'payouts_json')
+  if (value === undefined) return undefined
+  const payouts = Array.isArray(value)
+    ? value.filter(p => p && typeof p === 'object' && isText(p.txid) && isText(p.amount) && isText(p.asset) && (p.address === undefined || isText(p.address)))
+    : []
+  if (!Array.isArray(value) || payouts.length !== value.length) warnSwapColumn(row, 'payouts_json', 'malformed entries in')
+  return payouts.length ? payouts : undefined
+}
+
+const isPlainObject = (value: unknown): value is Record<string, any> => !!value && typeof value === 'object' && !Array.isArray(value)
+
+/** Tracking context needs its two addresses, or it is treated as absent, like a legacy row. Optional fields of the wrong
+ *  type are dropped, so a string "false" can never read as a Relay solver deposit. */
+function storedTrackingContext(row: any): SwapHistoryRecord['trackingContext'] {
+  const value = storedJson(row, 'tracking_context')
+  if (value === undefined) return undefined
+  if (!isPlainObject(value) || !isText(value.fromAddress) || !isText(value.toAddress)) {
+    warnSwapColumn(row, 'tracking_context', 'malformed')
+    return undefined
+  }
+  const context: NonNullable<SwapHistoryRecord['trackingContext']> = { fromAddress: value.fromAddress, toAddress: value.toAddress }
+  let dropped = false
+  for (const [key, valid] of [
+    ['fromAmountBaseUnits', isText],
+    ['relaySolverDeposit', (v: unknown) => typeof v === 'boolean'],
+    ['nearIntents', isPlainObject],
+  ] as const) {
+    if (value[key] === undefined) continue
+    if (valid(value[key])) (context as any)[key] = value[key]
+    else dropped = true
+  }
+  if (dropped) warnSwapColumn(row, 'tracking_context', 'malformed fields in')
+  return context
+}
+
+/** Stored duration, or for completed/refunded rows written before every settlement
+ *  path stored one, the same value derived from the row's own timestamps. */
+function swapDurationSeconds(r: any): number | undefined {
+  if (r.actual_time_secs !== null && r.actual_time_secs !== undefined) return r.actual_time_secs
+  if ((r.status === 'completed' || r.status === 'refunded') && r.completed_at && r.created_at) {
+    return Math.max(0, Math.round((r.completed_at - r.created_at) / 1000))
+  }
+  return undefined
+}
+
 function mapSwapRow(r: any): SwapHistoryRecord {
   return {
     id: r.id,
@@ -2918,10 +3001,10 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     updatedAt: r.updated_at,
     completedAt: r.completed_at || undefined,
     estimatedTimeSeconds: r.estimated_time_secs,
-    actualTimeSeconds: r.actual_time_secs || undefined,
+    actualTimeSeconds: swapDurationSeconds(r),
     approvalTxid: r.approval_txid || undefined,
     relayRequestId: r.relay_request_id || undefined,
-    trackingContext: r.tracking_context ? JSON.parse(r.tracking_context) : undefined,
+    trackingContext: storedTrackingContext(r),
     outboundChainId: r.outbound_chain_id || undefined,
     refundReason: r.refund_reason || undefined,
     nearTxHash: r.near_tx_hash || undefined,
@@ -2932,7 +3015,7 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     inboundConfirmedAt: r.inbound_confirmed_at ?? undefined,
     errorActionable: r.error_actionable || undefined,
     errorElapsedMinutes: r.error_elapsed_minutes ?? undefined,
-    payouts: r.payouts_json ? JSON.parse(r.payouts_json) : undefined,
+    payouts: storedPayouts(r),
   }
 }
 
@@ -3261,9 +3344,15 @@ export function addExternalEntry(args: {
       // Explicit save — confirm the contact (preserve the original save date if any).
       // A plain re-save (no cosigner given) keeps an existing co-signer flag; marking a
       // co-signer without a name keeps the name already saved.
-      const label = args.ensName || (existing.ens_name && args.label === undefined
-        ? existing.label || existing.ens_name
-        : cosigner !== null && !args.label ? existing.label : (args.label ?? null))
+      // An ENS save never replaces a name the user gave the contact: the ENS
+      // name is only the fallback label. A label equal to the stored ENS name
+      // was that fallback, so a newer ENS name may replace it.
+      const ownLabel = existing.label && existing.label !== existing.ens_name ? existing.label : null
+      const label = args.ensName
+        ? args.label || ownLabel || args.ensName
+        : existing.ens_name && args.label === undefined
+          ? existing.label || existing.ens_name
+          : cosigner !== null && !args.label ? existing.label : (args.label ?? null)
       db.run('UPDATE addressbook SET label = ?, ens_name = COALESCE(?, ens_name), saved_at = COALESCE(saved_at, ?), cosigner = COALESCE(?, cosigner), updated_at = ? WHERE id = ?', [label, args.ensName ?? null, now, cosigner, now, id])
     } else {
       id = crypto.randomUUID()
@@ -3271,7 +3360,7 @@ export function addExternalEntry(args: {
         `INSERT INTO addressbook
            (id, wallet_id, device_id, kind, network_id, chain_id, address, label, ens_name, saved_at, cosigner, created_at, updated_at)
          VALUES (?, ?, ?, 'external', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.ensName || args.label || null, args.ensName ?? null, now, cosigner ?? evmCosigner(addr, args.networkId, args.walletId), now, now],
+        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.label || args.ensName || null, args.ensName ?? null, now, cosigner ?? evmCosigner(addr, args.networkId, args.walletId), now, now],
       )
     }
     if (cosigner !== null) setEvmCosigner(id, cosigner === 1)

@@ -29,6 +29,9 @@ export function toBase64(bytes: Uint8Array): string {
 	return btoa(binary)
 }
 
+/** Name a pasted PSBT is analyzed under; shown to the user as "Pasted text". */
+const PASTED_NAME = "pasted"
+
 /** Exact: "12,345 sats (0.00012345 BTC)". Amounts arrive as decimal strings. */
 function sats(v: string): string {
 	const n = BigInt(v)
@@ -82,7 +85,7 @@ export function PsbtSignDialog() {
 		setReview(null)
 		setSigned(null)
 		try {
-			if (bytes.length > MAX_PSBT_BYTES) throw new Error("PSBT is larger than 1 MB, refusing")
+			if (bytes.length > MAX_PSBT_BYTES) throw new Error(uiText("PSBT is larger than 1 MB, refusing"))
 			const result = await rpcRequest<BtcPsbtReview>("btcPsbtAnalyze", { data: toBase64(bytes), name: fileName, expectedVaultPolicyId: expectedVaultPolicy.current }, 60000)
 			if (result.kind === "signed") {
 				// Already signed: nothing to sign, so review it for broadcast instead.
@@ -95,10 +98,10 @@ export function PsbtSignDialog() {
 				setPhase("review")
 			}
 		} catch (err: any) {
-			setError(err?.message || "Could not read this PSBT")
+			setError(err?.message || uiText("Could not read this PSBT"))
 			setPhase("error")
 		}
-	}, [])
+	}, [uiText])
 
 	// Drops (from FirmwareDropZone) open the review; the asset page opens the paste box.
 	// Neither signs. New input is ignored while busy.
@@ -109,7 +112,7 @@ export function PsbtSignDialog() {
 			if (busy() || !file) return
 			if (file.size > MAX_PSBT_BYTES) {
 				setName(file.name)
-				setError("PSBT is larger than 1 MB, refusing")
+				setError(uiText("PSBT is larger than 1 MB, refusing"))
 				setPhase("error")
 				return
 			}
@@ -135,7 +138,7 @@ export function PsbtSignDialog() {
 			window.removeEventListener(PSBT_DROP_EVENT, onDrop)
 			window.removeEventListener(PSBT_PASTE_EVENT, onPaste)
 		}
-	}, [analyze])
+	}, [analyze, uiText])
 
 	const handleSign = useCallback(async () => {
 		if (!review) return
@@ -147,10 +150,10 @@ export function PsbtSignDialog() {
 			setSigned(result)
 			setPhase("done")
 		} catch (err: any) {
-			setError(err?.message || "Signing failed")
+			setError(err?.message || uiText("Signing failed"))
 			setPhase("error")
 		}
-	}, [review])
+	}, [review, uiText])
 
 	const handleCopy = useCallback(() => {
 		if (!signed?.txHex) return
@@ -179,14 +182,14 @@ export function PsbtSignDialog() {
 	const warnings: string[] = []
 	if (review) {
 		const f = review.flags
-		if (f.unverifiedAmounts) warnings.push("The input amount is not verified: this file has no previous transaction, so the fee is taken on trust from it.")
-		if (f.multiAccount) warnings.push("Inputs come from more than one account. The KeepKey will show every output, change included.")
-		if (f.ownOutputShown) warnings.push("An output pays back to this wallet but is not standard change. The KeepKey shows its address.")
-		if (f.noChange) warnings.push("No change output: everything except the outputs below goes to the fee.")
-		if (review.feePercent !== null && review.feePercent > 5) warnings.push(`High fee: ${review.feePercent}% of the amount sent.`)
+		if (f.unverifiedAmounts) warnings.push(uiText("The input amount is not verified: this file has no previous transaction, so the fee is taken on trust from it."))
+		if (f.multiAccount) warnings.push(uiText("Inputs come from more than one account. The KeepKey will show every output, change included."))
+		if (f.ownOutputShown) warnings.push(uiText("An output pays back to this wallet but is not standard change. The KeepKey shows its address."))
+		if (f.noChange) warnings.push(uiText("No change output: everything except the outputs below goes to the fee."))
+		if (review.feePercent !== null && review.feePercent > 5) warnings.push(uiText("High fee: {{percent}}% of the amount sent.", { percent: review.feePercent }))
 		// Wallets set a block-height locktime by default (anti-fee-sniping, shown in the info line); a timestamp one is unusual.
-		if (f.nonZeroLocktime && review.locktime >= 500000000) warnings.push(`Locktime ${review.locktime} is a timestamp: the KeepKey does not show this.`)
-		if (f.unusualVersion) warnings.push(`Unusual transaction version ${review.version}.`)
+		if (f.nonZeroLocktime && review.locktime >= 500000000) warnings.push(uiText("Locktime {{locktime}} is a timestamp: the KeepKey does not show this.", { locktime: review.locktime }))
+		if (f.unusualVersion) warnings.push(uiText("Unusual transaction version {{version}}.", { version: review.version }))
 	}
 
 	return (
@@ -202,7 +205,7 @@ export function PsbtSignDialog() {
 			>
 				<Box p="6">
 					<Text fontSize="lg" fontWeight="700" color="kk.textPrimary">{uiText("Sign Bitcoin PSBT")}</Text>
-					<Text fontSize="xs" color="kk.textSecondary" mb="4">{uiText("Bitcoin mainnet")}{name ? ` · ${name}` : ""}</Text>
+					<Text fontSize="xs" color="kk.textSecondary" mb="4">{uiText("Bitcoin mainnet")}{name ? ` · ${name === PASTED_NAME ? uiText("Pasted text") : name}` : ""}</Text>
 
 					{phase === "analyzing" && (
 						<Flex align="center" gap="2" py="6" justify="center">
@@ -221,7 +224,7 @@ export function PsbtSignDialog() {
 								<Button {...plainButton} onClick={handleDismiss}>{uiText("Cancel")}</Button>
 								{multisigEnabled && <Button {...plainButton} onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>{uiText("Multisig setup")}</Button>}
 								<Button {...plainButton} onClick={() => { handleDismiss(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>{uiText("Scan QR")}</Button>
-								<Button {...goldButton} disabled={!pasted.trim()} onClick={() => void analyze(new TextEncoder().encode(pasted), "pasted")}>{uiText("Check")}</Button>
+								<Button {...goldButton} disabled={!pasted.trim()} onClick={() => void analyze(new TextEncoder().encode(pasted), PASTED_NAME)}>{uiText("Check")}</Button>
 							</Flex>
 						</>
 					)}
@@ -265,9 +268,9 @@ export function PsbtSignDialog() {
 										<Flex justify="space-between" align="center" gap="2" mt="0.5">
 											<Text fontSize="xs" color="kk.textPrimary">{sats(o.amount)}</Text>
 											<Badge ok={o.deviceWillShow !== "address" || o.kind === "payment"}>
-												{o.deviceWillShow === "hidden-change" ? `change, hidden on KeepKey · ${o.path}`
+												{o.deviceWillShow === "hidden-change" ? uiText("change, hidden on KeepKey · {{path}}", { path: o.path ?? "" })
 													: o.deviceWillShow === "op-return" ? uiText("KeepKey shows the data")
-													: o.kind === "own" ? `yours (${o.path}) · KeepKey shows address`
+													: o.kind === "own" ? uiText("yours ({{path}}) · KeepKey shows address", { path: o.path ?? "" })
 													: uiText("KeepKey shows address")}
 											</Badge>
 										</Flex>
@@ -280,7 +283,7 @@ export function PsbtSignDialog() {
 								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">{uiText("Fee")}</Text><Text fontSize="xs" color="kk.textPrimary">{sats(review.fee)}</Text></Flex>
 								<Flex justify="space-between">
 									<Text fontSize="xs" color="kk.textSecondary">{uiText("Fee rate")}</Text>
-									<Text fontSize="xs" color="kk.textPrimary">~{review.satPerVbyte}{" "}{uiText("sat/vB (est.")}{" "}{review.estVsize}{" "}{uiText("vB)")}{review.feePercent !== null ? ` · ${review.feePercent}% of sent` : ""}</Text>
+									<Text fontSize="xs" color="kk.textPrimary">~{review.satPerVbyte}{" "}{uiText("sat/vB (est.")}{" "}{review.estVsize}{" "}{uiText("vB)")}{review.feePercent !== null ? ` · ${uiText("{{percent}}% of sent", { percent: review.feePercent })}` : ""}</Text>
 								</Flex>
 								<Flex justify="space-between" mt="1">
 									<Text fontSize="xs" color="kk.textSecondary">{uiText("KeepKey \"total\" screen (sent + fee)")}</Text>
@@ -306,7 +309,7 @@ export function PsbtSignDialog() {
 					{phase === "done" && signed && (
 						<Flex direction="column" gap="3">
 							<Text fontSize="sm" fontWeight="600" color="var(--teal-2)">
-								{signed.complete ? (signed.threshold ? "Signed. Quorum reached; return the PSBT to your coordinator or broadcast the completed transaction." : "Signed. Load the file back into your wallet, or broadcast the raw transaction.") : uiText("KeepKey’s signature added. More signatures are needed. Return this PSBT to Sparrow or Electrum.")}
+								{signed.complete ? (signed.threshold ? uiText("Signed. Quorum reached; return the PSBT to your coordinator or broadcast the completed transaction.") : uiText("Signed. Load the file back into your wallet, or broadcast the raw transaction.")) : uiText("KeepKey’s signature added. More signatures are needed. Return this PSBT to Sparrow or Electrum.")}
 							</Text>
 							<Box {...card}>
 								<Box mb="2">

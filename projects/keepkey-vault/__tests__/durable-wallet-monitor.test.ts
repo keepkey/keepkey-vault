@@ -140,3 +140,50 @@ test('failed explicit disable reports failure and keeps the live registration us
   monitor.replace(session, addresses); await tick(); await expect(monitor.suspend()).rejects.toThrow('Offline mode was not enabled')
   expect(disabled).toBe(true); await monitor.replay(); monitor.stop()
 })
+
+test('a failing replay page stays replayable while later pages are processed', async () => {
+  const { createActiveWalletWatch } = await import('../src/bun/active-wallet-watch')
+  const { createChainBackoff } = await import('../src/bun/chain-backoff')
+  const owned = [
+    { address: 'tron-account', networkId: 'tron:mainnet', chainId: 'tron', caip: 'tron:mainnet/slip44:195', account: true },
+    { address: 'ltc-account', networkId: 'bip122:ltc', chainId: 'litecoin', caip: 'bip122:ltc/slip44:2', account: true },
+  ]
+  const page = [
+    { eventId: 'evt-tron', eventName: 'tx:incoming', payload: { watchedAddress: 'tron-account', networkId: 'tron:mainnet', txid: 'tron-payment' } },
+    { eventId: 'evt-ltc', eventName: 'tx:incoming', payload: { watchedAddress: 'ltc-account', networkId: 'bip122:ltc', txid: 'ltc-payment' } },
+  ]
+  const timers: Array<{ run: () => void; ms: number; cleared?: boolean }> = []
+  const next = (ms: number) => { const timer = timers.find(entry => !entry.cleared && entry.ms === ms)!; timer.cleared = true; timer.run() }
+  const refreshed: any[] = []
+  let tronDown = true
+  const watcher = createActiveWalletWatch({ getScope: () => session.scope, canWatch: () => true, isChainEnabled: () => true,
+    start: () => {}, stop: () => {}, backoff: createChainBackoff({ jitter: 0 }),
+    setTimer: (run, ms) => { const timer = { run, ms }; timers.push(timer); return timer }, clearTimer: timer => { (timer as any).cleared = true },
+    refresh: async hint => { refreshed.push(hint); if (hint.chainId === 'tron' && tronDown) throw new Error('TRON history failed (429)') } })
+  watcher.add(owned, session.scope); next(250)
+
+  const requests: Array<{ path: string; body: any }> = [], cursors = new Map<string, string>()
+  const monitor = createDurableWalletMonitor({ isCurrent: () => true, readCursor: key => cursors.get(key), writeCursor: (key, value) => { cursors.set(key, value) },
+    deliver: value => watcher.event(value as any), flush: () => watcher.flush(), now: () => 100,
+    fetch: (async (url, init) => {
+      const path = String(url).split('/events/')[1], body = init?.body ? JSON.parse(String(init.body)) : undefined
+      requests.push({ path, body })
+      if (path.startsWith('replay')) return Response.json(path.includes('after=page-1')
+        ? { events: [page[1]], cursor: 'page-2' }
+        : { events: Array.from({ length: 100 }, () => page[0]), cursor: 'page-1' })
+      return path === 'ack' ? new Response(null, { status: 204 }) : Response.json({ enabled: body.enabled })
+    }) as typeof fetch,
+  })
+  monitor.replace(session, owned.map(({ address, networkId }) => ({ address, networkId }))); await tick(); await tick()
+
+  expect(refreshed.filter(hint => hint.txids.length).map(hint => [hint.chainId, hint.txids]).sort()).toEqual([['litecoin', ['ltc-payment']], ['tron', ['tron-payment']]])
+  expect(requests.some(request => request.path.includes('after=page-1'))).toBe(true)
+  expect(requests.some(request => request.path === 'ack')).toBe(false)
+  expect(cursors.get(monitorCursorContext(session))).toBeUndefined()
+  // TRON retries alone 5 s later, still carrying its payment.
+  tronDown = false; next(5_000); await tick()
+  expect(refreshed.at(-1)).toMatchObject({ chainId: 'tron', txids: ['tron-payment'], catchup: false })
+  await monitor.replay()
+  expect(cursors.get(monitorCursorContext(session))).toBe('page-2')
+  monitor.stop(); watcher.stop()
+})

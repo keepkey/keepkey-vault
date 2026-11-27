@@ -16,13 +16,16 @@ export async function parseRequest<T extends z.ZodType>(
     throw new HttpError(400, 'Invalid JSON body')
   }
   const result = schema.safeParse(raw)
-  if (!result.success) {
-    const issues = result.error.issues
-      .map((i: any) => `${i.path.join('.')}: ${i.message}`)
-      .join('; ')
-    throw new HttpError(400, `Validation error: ${issues}`)
-  }
+  if (!result.success) throw new HttpError(400, validationErrorMessage(result.error))
   return result.data
+}
+
+/** The 400 message parseRequest sends, for checks that run before the handler. */
+export function validationErrorMessage(error: z.ZodError): string {
+  const issues = error.issues
+    .map((i: any) => `${i.path.join('.')}: ${i.message}`)
+    .join('; ')
+  return `Validation error: ${issues}`
 }
 
 /**

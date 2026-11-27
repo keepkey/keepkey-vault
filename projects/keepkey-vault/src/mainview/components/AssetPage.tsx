@@ -7,8 +7,10 @@ import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
 import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy, FaTag, FaChevronDown, FaChevronUp } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { useAppSettingsLoader } from "../hooks/useAppSettingsLoader"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, btcScriptTypeConfig, btcAccountPath, evmAddressPath, isChainSupported } from "../../shared/chains"
+import { hardenedAccount, isAccountIndex } from "../../shared/bip32-account"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset, BtcWatchOnlyReceive } from "../../shared/types"
 import { VAULT_CHAIN_TO_THOR } from "../../shared/swap-discovery"
 import { getAssetIcon } from "../../shared/assetLookup"
@@ -60,6 +62,7 @@ import { VaultAssetAccount } from './VaultAssetAccount'
 import { VaultAssetPage } from './VaultAssetPage'
 import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
 import { showWatchOnlyAddress } from "../../shared/watch-only-verify"
+import { getDateLocale } from '../lib/date-locale'
 
 type AssetView = "receive" | "send" | "privacy" | "psbt" | "multisig"
 
@@ -230,17 +233,17 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	}, [chain.chainFamily, multisigEnabled])
 	const evmMultisig = multisigEnabled && chain.chainFamily === 'evm' && safeChainIds.includes(Number(chain.chainId))
 	const settingsLoaded = useRef(false)
+	// A failed settings read is retried so the Zcash privacy sections are not left hidden (audit v6 H10).
+	const loadSettings = useAppSettingsLoader((s: AppSettings) => {
+		settingsLoaded.current = true
+		setZcashPrivacyEnabled(s.zcashPrivacyEnabled)
+	}, 30000)
 	const refreshFeatureFlags = useCallback(() => {
-		rpcRequest<AppSettings>("getAppSettings")
-			.then(s => {
-				settingsLoaded.current = true
-				setZcashPrivacyEnabled(s.zcashPrivacyEnabled)
-			})
-			.catch(() => {})
+		loadSettings()
 		rpcRequest<string[]>("getSwappableChainIds", undefined, 20000)
 			.then(ids => setSwappableChainIds(new Set(ids)))
 			.catch(() => {})
-	}, [])
+	}, [loadSettings])
 	useEffect(() => { refreshFeatureFlags() }, [refreshFeatureFlags])
 	useEffect(() => {
 		window.addEventListener('keepkey-settings-changed', refreshFeatureFlags)
@@ -377,7 +380,8 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		if (!isBtc || !btcAccounts.selectedXpub) return null
 		const { accountIndex, scriptType } = btcAccounts.selectedXpub
 		const stConfig = btcScriptTypeConfig(scriptType)
-		if (!stConfig) return null
+		// btcAccountPath throws for an index that cannot be derived; never let that break the page while it renders.
+		if (!stConfig || !isAccountIndex(accountIndex)) return null
 		const accountPath = btcAccountPath(stConfig.purpose, accountIndex)
 		const fullPath = [...accountPath, btcChangeIndex, btcAddressIndex]
 		const account = btcAccounts.accounts.find(a => a.accountIndex === accountIndex)
@@ -622,13 +626,13 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		const p = [...chain.defaultPath]
 		const purpose = utxoScripts?.find(s => s.scriptType === (st || utxoScriptType))?.purpose
 		if (purpose != null) p[0] = (0x80000000 + purpose) >>> 0
-		p[2] = (0x80000000 + n) >>> 0
+		p[2] = hardenedAccount(n)
 		return p
 	}, [chain.defaultPath, utxoScripts, utxoScriptType])
 	useEffect(() => {
 		if (!isAltUtxo || watchOnly) return
 		rpcRequest<{ accounts: number[] }>('getUtxoAccounts', { chainId: chain.id }, 15000)
-			.then(res => { if (res?.accounts?.length) setUtxoAccounts(res.accounts) })
+			.then(res => { const accounts = (res?.accounts || []).filter(isAccountIndex); if (accounts.length) setUtxoAccounts(accounts) })
 			.catch(e => console.warn(`[AssetPage] ${chain.coin} getUtxoAccounts failed:`, e))
 	}, [isAltUtxo, watchOnly, chain.id, chain.coin])
 	const selectUtxoAccount = useCallback((n: number) => {
@@ -1228,10 +1232,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 											// Cache (watch-only, or older than this chain's last tx): never "Synced".
 											// Say it is cached and how old it is (audit v4 H3).
 											<Flex align="center" gap="1" color="var(--gold)" className="v3-glass-chip" px="2" py="0.5"
-												title={activeBalance.updatedAt ? `Cached ${new Date(activeBalance.updatedAt).toLocaleString(getNumberLocale())}` : undefined}>
+												title={activeBalance.updatedAt ? `${t("cached", { defaultValue: "Cached" })} · ${new Date(activeBalance.updatedAt).toLocaleString(getDateLocale())}` : undefined}>
 												<Box w="6px" h="6px" borderRadius="full" bg="var(--gold)" />
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">
-													{t("cached", { defaultValue: "Cached" })}{activeBalance.updatedAt ? ` · ${new Date(activeBalance.updatedAt).toLocaleString(getNumberLocale(), { dateStyle: "medium", timeStyle: "short" })}` : ""}
+													{t("cached", { defaultValue: "Cached" })}{activeBalance.updatedAt ? ` · ${new Date(activeBalance.updatedAt).toLocaleString(getDateLocale(), { dateStyle: "medium", timeStyle: "short" })}` : ""}
 												</Text>
 											</Flex>
 										) : chain.id === 'zcash' ? (
@@ -1240,10 +1244,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 											</Text>
 									) : headerBalanceKnown ? (
 											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5"
-												title={lastSyncedAt ? `Last updated ${lastSyncedAt.toLocaleString(getNumberLocale())}` : undefined}>
+												title={lastSyncedAt ? uiText("Last updated {{time}}", { time: lastSyncedAt.toLocaleString(getDateLocale()) }) : undefined}>
 												<Box as={FaCheck} fontSize="9px" />
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">
-													{t("synced")}{lastSyncedAt ? ` · ${lastSyncedAt.toLocaleTimeString(getNumberLocale(), { hour: '2-digit', minute: '2-digit' })}` : ''}
+													{t("synced")}{lastSyncedAt ? ` · ${lastSyncedAt.toLocaleTimeString(getDateLocale(), { timeStyle: 'short' })}` : ''}
 												</Text>
 											</Flex>
 										) : (

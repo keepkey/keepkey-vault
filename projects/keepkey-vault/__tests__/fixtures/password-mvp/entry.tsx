@@ -13,9 +13,10 @@ import '../../../src/mainview/styles/tokens.css'
 function Fixture() {
   const [settings, setSettings] = useState(false)
   const [tab, setTab] = useState<NavTab>('vault')
+  const showVolumes = new URLSearchParams(location.search).has('volumes')
   return <>
     <TopNav connected label="Synthetic test KeepKey" activeTab={tab} onTabChange={setTab} onSettingsToggle={() => setSettings(v => !v)} settingsOpen={settings} />
-    <Box pt="70px"><p data-testid="fixture-home">Synthetic test wallet. No real device or passwords.</p><VaultToolsButton seedVaultAvailable /></Box>
+    <Box pt="70px"><p data-testid="fixture-home">Synthetic test wallet. No real device or passwords.</p><VaultToolsButton seedVaultAvailable passkeysAvailable={showVolumes} volumesAvailable={showVolumes} /></Box>
     <DeviceSettingsDrawer open={settings} onClose={() => setSettings(false)} onChooseNetworks={() => {}} deviceState={{ state: 'ready', activeTransport: 'webusb', updatePhase: 'idle', bootloaderMode: false, needsBootloaderUpdate: false, needsFirmwareUpdate: false, needsInit: false, initialized: true, passphraseProtection: false, isOob: false, isEmulator: false, firmwareVersion: '7.17.0', label: 'Synthetic test KeepKey' }} />
   </>
 }

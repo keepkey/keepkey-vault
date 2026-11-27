@@ -12,6 +12,8 @@ import { isEvmAddress } from '../../shared/address-validation'
 import { GAS_PRICE_ERROR } from '../../shared/gas-price-errors'
 import { decimalAmount } from '../../shared/locale'
 import { ARBITRUM_ONE_RPC, estimateGas, getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
+import { swapGasMinimumWei } from '../swap-gas-floor'
+import { balanceErrorMessage } from '../../shared/send-balance-errors'
 
 const TAG = '[txbuilder:evm]'
 
@@ -228,13 +230,21 @@ export async function buildEvmTx(
   // minimum use the quote itself as the floor: eth_gasPrice is the base fee
   // plus a small tip, so the slow discount would bid under the base fee
   // (Arbitrum rejects that transaction; OP Stack chains leave it unmined).
-  // Ethereum has no floor: it signs the live quote (often well under 1 gwei).
-  const MIN_GAS_WEI: Record<number, bigint> = {
-    56: BigInt(3e9),     // BSC
-    137: BigInt(30e9),   // Polygon
-    43114: BigInt(25e9), // Avalanche
-  }
-  const minGas = MIN_GAS_WEI[chainId] ?? quotedGasPrice
+  // The old 3 gwei (BSC) and 25 gwei (Avalanche) floors were 10–30× the quote
+  // (audit v6 B12). BSC: the quote is the floor, never under its validators'
+  // minimum (0.05 gwei, bsc miner.GasPrice default), so the slow level cannot
+  // sign under the quote and leave the tx stuck (KEEPKEY-164); the same rule
+  // as swaps, from swap-gas-floor.ts, so the two cannot drift. Avalanche has
+  // no fixed minimum since ACP-176: the quote (base fee + tip) is the floor,
+  // with 25% headroom, since its legacy tx stalls if the base fee rises past
+  // it while the user reviews on the device. Polygon keeps 30 gwei: its nodes
+  // refuse tips under 25 gwei (PIP-35).
+  const POLYGON_MIN_GAS_WEI = BigInt(30e9)
+  const minGas =
+    chainId === 43114 ? quotedGasPrice * 125n / 100n // Avalanche
+    : chainId === 56 ? swapGasMinimumWei('bsc', quotedGasPrice)
+    : chainId === 137 ? POLYGON_MIN_GAS_WEI
+    : quotedGasPrice
   if (gasPrice < minGas) {
     console.log(`${TAG} Gas price ${gasPrice} below floor ${minGas} — using floor`)
     gasPrice = minGas
@@ -343,7 +353,7 @@ export async function buildEvmTx(
     } else {
       if (isNaN(amountNum) || amountNum <= 0) throw new Error('Invalid token amount')
       amountBaseUnits = parseUnits(String(params.amount), tokenDecimals)
-      if (amountBaseUnits > available) throw new Error(`Insufficient balance: ${tokBalStr} available, ${params.amount} requested`)
+      if (amountBaseUnits > available) throw new Error(balanceErrorMessage('tokenAmount', { available: tokBalStr, requested: params.amount }))
     }
 
     console.log(`${TAG} ERC-20 transfer: ${amountBaseUnits} base units → ${contractAddress}`)
@@ -363,10 +373,9 @@ export async function buildEvmTx(
 
     // Validate native balance covers gas
     if (nativeBalance < gasFee) {
-      throw new Error(
-        `Insufficient ${chain.symbol} for gas: have ${Number(nativeBalance) / 1e18}, ` +
-        `need ~${Number(gasFee) / 1e18} ${chain.symbol}`,
-      )
+      throw new Error(balanceErrorMessage('gas', {
+        symbol: chain.symbol, have: Number(nativeBalance) / 1e18, need: Number(gasFee) / 1e18,
+      }))
     }
 
     return {
@@ -408,9 +417,9 @@ export async function buildEvmTx(
   let amountWei: bigint
   if (isMax) {
     const gasReserve = (gasFee * 110n + 99n) / 100n // 10% gas buffer, rounded up
-    if (nativeBalance <= gasReserve) throw new Error('Insufficient funds to cover gas fees')
+    if (nativeBalance <= gasReserve) throw new Error(balanceErrorMessage('gasForMax'))
     amountWei = nativeBalance - gasReserve
-    if (amountWei <= 0n) throw new Error('Insufficient funds to cover gas fees')
+    if (amountWei <= 0n) throw new Error(balanceErrorMessage('gasForMax'))
   } else {
     amountWei = parseUnits(String(params.amount), 18)
     // No `&& nativeBalance > 0n` escape hatch. That guard existed to keep a
@@ -418,10 +427,9 @@ export async function buildEvmTx(
     // an unverifiable balance now throws above, so the only way to reach here
     // with 0n is a genuinely empty account, which must fail this check.
     if (amountWei + gasFee > nativeBalance) {
-      throw new Error(
-        `Insufficient funds: balance ${Number(nativeBalance) / 1e18} ${chain.symbol}, ` +
-        `need ${Number(amountWei + gasFee) / 1e18} ${chain.symbol} (incl gas)`,
-      )
+      throw new Error(balanceErrorMessage('amountAndGas', {
+        symbol: chain.symbol, have: Number(nativeBalance) / 1e18, need: Number(amountWei + gasFee) / 1e18,
+      }))
     }
   }
 

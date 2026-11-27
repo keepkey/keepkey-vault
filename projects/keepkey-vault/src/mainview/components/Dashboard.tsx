@@ -36,6 +36,7 @@ const LazySwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m
 const LazyDefiPositionsPanel = lazy(() => import("./DefiPositionsPanel").then(m => ({ default: m.DefiPositionsPanel })))
 
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { useAppSettingsLoader } from "../hooks/useAppSettingsLoader"
 import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/commandBus"
 import { useIconColor } from "../lib/iconColor"
 import { preloadIcons } from "../lib/iconPreload"
@@ -68,6 +69,7 @@ import {
 } from "../../shared/balance-reconciliation"
 import { ownerUsdAtAggregatePrice, selectedOwnerBalance } from "../lib/effective-balance"
 import { playChaChing } from "../lib/sounds"
+import { getDateLocale } from '../lib/date-locale'
 
 /** Error boundary wrapping AssetPage — ensures user can always go back to Dashboard */
 class AssetPageErrorBoundary extends Component<
@@ -1110,18 +1112,15 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 		return onRpcMessage('token-visibility-changed', refetch)
 	}, [])
 
-	// Load feature flags (re-check when settings change)
-	const refreshFeatureFlags = useCallback(() => {
-		rpcRequest<AppSettings>('getAppSettings', undefined, 5000)
-			.then(s => {
-				setZcashEnabled(s.zcashPrivacyEnabled)
-				setMoneroEnabled(s.moneroEnabled)
-				setHiveEnabled(s.hiveEnabled)
-				setDisabledNetworks(s.disabledNetworks)
-				setPassphraseIntroSeen(s.passphraseIntroShown)
-			})
-			.catch(() => {})
-	}, [])
+	// Load feature flags (re-check when settings change). A failed read is retried instead of leaving Zcash, Hive and
+	// Monero hidden until something else changes (audit v6 H10).
+	const refreshFeatureFlags = useAppSettingsLoader((s: AppSettings) => {
+		setZcashEnabled(s.zcashPrivacyEnabled)
+		setMoneroEnabled(s.moneroEnabled)
+		setHiveEnabled(s.hiveEnabled)
+		setDisabledNetworks(s.disabledNetworks)
+		setPassphraseIntroSeen(s.passphraseIntroShown)
+	})
 
 	// Zcash/Hive are derived from the connected device's firmware — refetch when
 	// the reported version changes, not just on mount.
@@ -1892,6 +1891,8 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 	}, [cleanBalanceUsd])
 
 	const btcOnly = isBitcoinOnlyVariant(firmwareVariant)
+	const deviceToolsAvailable = !watchOnly && !!firmwareVersion
+	const supportsSeedAndPasskeys = deviceToolsAvailable && versionCompare(firmwareVersion!, '7.16.0') >= 0
 	const visibleChains = useMemo(() => allChains.filter(c => {
 		// Bitcoin-only firmware physically can't touch other chains — show only BTC.
 		if (btcOnly) return c.id === 'bitcoin'
@@ -2539,7 +2540,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 						<circle cx="12" cy="12" r="3" />
 					</svg>
 					<Text fontSize="xs" color="kk.gold" fontWeight="500">
-						{t("watchOnlyBanner")}{displayedUpdatedAt ? ` · ${t("lastUpdated", { time: new Date(displayedUpdatedAt).toLocaleString(getNumberLocale(), { dateStyle: "medium", timeStyle: "short" }) })}` : ""}
+						{t("watchOnlyBanner")}{displayedUpdatedAt ? ` · ${t("lastUpdated", { time: new Date(displayedUpdatedAt).toLocaleString(getDateLocale(), { dateStyle: "medium", timeStyle: "short" }) })}` : ""}
 					</Text>
 				</Flex>
 			)}
@@ -3374,11 +3375,11 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 				/>
 			)}
 
-			{/* One lock button for password and seed tools. */}
-			{!watchOnly && firmwareVersion && <VaultToolsButton
-				seedVaultAvailable={versionCompare(firmwareVersion, '7.16.0') >= 0}
-				passwordsAvailable={!btcOnly}
-				passkeysAvailable={versionCompare(firmwareVersion, '7.16.0') >= 0} />}
+			<VaultToolsButton
+				seedVaultAvailable={supportsSeedAndPasskeys}
+				passwordsAvailable={deviceToolsAvailable && !btcOnly}
+				passkeysAvailable={supportsSeedAndPasskeys}
+				volumesAvailable={import.meta.env.VITE_ENABLE_VOLUMES === 'true'} />
 
 			</Flex>
 		</Flex>

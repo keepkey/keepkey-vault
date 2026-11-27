@@ -1,5 +1,4 @@
 import i18n from '../i18n'
-import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Box, Flex, Text, VStack, HStack, Image, Spinner } from "@chakra-ui/react"
@@ -15,6 +14,7 @@ import {
   type TxDetail, type ActivityTimelineItem,
 } from "./ActivityPanel"
 import { ReportDialog } from "./ReportDialog"
+import { getDateLocale } from '../lib/date-locale'
 
 interface ActivityPageProps {
   defaultChainId?: string
@@ -47,7 +47,7 @@ function bucketByDate(items: ActivityTimelineItem[], language: string): Array<{ 
     if (d.toDateString() === today.toDateString()) label = new Intl.RelativeTimeFormat(language, { numeric: 'auto' }).format(0, 'day')
     else if (d.toDateString() === yesterday.toDateString()) label = new Intl.RelativeTimeFormat(language, { numeric: 'auto' }).format(-1, 'day')
     else {
-      label = d.toLocaleDateString(getNumberLocale(), { month: 'short', day: 'numeric', year: 'numeric' })
+      label = d.toLocaleDateString(getDateLocale(), { month: 'short', day: 'numeric', year: 'numeric' })
     }
     if (!groups.has(label)) groups.set(label, [])
     groups.get(label)!.push(item)
@@ -373,10 +373,10 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
   }, [onResumeSwap, watchOnly, watchOnlyDeviceId])
 
   const TYPE_PILLS = [
-    { id: 'send', label: 'Sent' },
-    { id: 'receive', label: 'Received' },
-    { id: 'swap', label: 'Swaps' },
-    { id: 'sign', label: 'Signs' },
+    { id: 'send', label: uiText("Sent") },
+    { id: 'receive', label: uiText("Received") },
+    { id: 'swap', label: uiText("Swaps") },
+    { id: 'sign', label: uiText("Signs") },
   ]
 
   const pending = useMemo(() =>
@@ -466,7 +466,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
             <Box w="8px" h="8px" borderRadius="full" bg="var(--gold)" flexShrink={0}
               style={{ animation: 'kkActivityPulse 1.6s ease-in-out infinite' }} />
             <Text fontSize="12px" color="var(--text-0)" fontWeight="600">
-              {pending.length}{" "}{uiText("transaction")}{pending.length === 1 ? '' : 's'}{" "}{uiText("broadcasting")}</Text>
+              {uiText("Transactions broadcasting: {{count}}", { count: pending.length })}</Text>
             <Text fontSize="11px" color="var(--text-2)">
               {pending.map(s => `${s.fromSymbol} → ${s.toSymbol}`).join(' · ')}
             </Text>
@@ -487,10 +487,10 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
 
         {/* Stat cards */}
         <Flex gap="3" mb="5" wrap={{ base: "wrap", md: "nowrap" }}>
-          <StatCard label={uiText("Total Events")} value={stats.total} sub={loading ? 'Loading…' : undefined} />
-          <StatCard label={uiText("Sent")} value={stats.sent} sub={stats.sent > 0 ? `${stats.sent} tx${stats.sent > 1 ? 's' : ''}` : 'None'} accent="var(--rose)" />
-          <StatCard label={uiText("Received")} value={stats.received} sub={stats.received > 0 ? `${stats.received} tx${stats.received > 1 ? 's' : ''}` : 'None'} accent="var(--teal)" />
-          <StatCard label={uiText("Swaps")} value={stats.swaps} sub={stats.swaps > 0 ? `${stats.swaps} total` : 'None'} accent="var(--gold)" />
+          <StatCard label={uiText("Total Events")} value={stats.total} sub={loading ? uiText("Loading…") : undefined} />
+          <StatCard label={uiText("Sent")} value={stats.sent} sub={stats.sent > 0 ? uiText("Transactions: {{count}}", { count: stats.sent }) : uiText("None")} accent="var(--rose)" />
+          <StatCard label={uiText("Received")} value={stats.received} sub={stats.received > 0 ? uiText("Transactions: {{count}}", { count: stats.received }) : uiText("None")} accent="var(--teal)" />
+          <StatCard label={uiText("Swaps")} value={stats.swaps} sub={stats.swaps > 0 ? uiText("Total: {{count}}", { count: stats.swaps }) : uiText("None")} accent="var(--gold)" />
         </Flex>
 
         {/* Filter toolbar */}
@@ -579,7 +579,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
 
           {/* Result count */}
           <Text fontSize="11px" color="var(--text-3)" ml="auto" flexShrink={0}>
-            {filteredTimeline.length}{" "}{uiText("of")}{" "}{activities.length + pendingSwaps.filter(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded').length}
+            {uiText("{{shown}} of {{total}}", { shown: filteredTimeline.length, total: activities.length + pendingSwaps.filter(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded').length })}
           </Text>
         </Flex>
 
@@ -595,7 +595,8 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
             <Text fontSize="13px" color="var(--text-3)" textAlign="center">
               {typeFilters.size > 0 || chainFilter || search
                 ? uiText("No activity matches your filters")
-                : historyError || uiText("No activity yet — click Rescan to load history.")}
+                // The hook's error is raw backend text (English); show it translated instead.
+                : historyError ? uiText("Could not load activity history. Try Rescan.") : uiText("No activity yet — click Rescan to load history.")}
             </Text>
             {!chainFilter && !search && typeFilters.size === 0 && (
               <Box

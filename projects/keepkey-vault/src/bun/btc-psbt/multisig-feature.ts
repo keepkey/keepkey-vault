@@ -9,6 +9,13 @@ export function btcMultisigEnabled(get: ReadSetting): boolean {
 export function requireBtcMultisig(get: ReadSetting): void {
   if (!btcMultisigEnabled(get)) throw new Error(BTC_MULTISIG_DISABLED);
 }
+/** Segwit multisig script names (p2wsh, p2sh-p2wsh) are not hdwallet script
+ *  types: the device signs them as p2wpkh / p2sh-p2wpkh carrying the multisig
+ *  object, which is how the app's own multisig flow sends them
+ *  (firmwareMultisigType in multisig-cosign.ts). Other names pass through. */
+export function deviceScriptType<T>(scriptType: T): T | "p2wpkh" | "p2sh-p2wpkh" {
+  return scriptType === "p2wsh" ? "p2wpkh" : scriptType === "p2sh-p2wsh" ? "p2sh-p2wpkh" : scriptType;
+}
 /** Low-level APIs can also carry native/wrapped multisig in an ordinary input. */
 export function hasMultisigSigningData(
   request: { inputs?: unknown; outputs?: unknown } | undefined

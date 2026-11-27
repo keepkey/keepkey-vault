@@ -38,14 +38,16 @@ import { resolveStoredEnsContact } from './db'
 import { previewCertificationEntries, selectCertificationContacts } from './addressbook-clearsign'
 import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
+import { createDesktopVolumeStore, openExternalVolume, scanVolumeInventory } from './volumes'
+import { openVolumeEncryptionSettings } from './volume-finder'
+import { deriveVolumePassword } from './volume-key'
+import { volumeCipherKey } from '../shared/volume-key'
+import type { VolumeInventory, VolumeDeviceStatus, VolumeProgress, VolumeProgressEvent } from '../shared/volumes'
 import { withKeepKeyFido, readStatus, runReset, waitForReplug } from './passkeys'
 import { setFidoPin, listPasskeys, deletePasskey } from './passkeys-manage'
 import { resolveLabels, cleanLabel } from './passkey-labels'
-import { passwordDeviceCipher } from './password-device'
-import { savePasswordBackup } from './password-backup'
-import { PasswordBex } from './password-bex'
-import { PasswordAgent } from './password-agent'
-import { callBex, listBrowsers } from './bex-bridge'
+import { passwordDeviceCipher, passwordWalletSelector, supportsDeviceCipher } from './password-device'
+import { replaceEncryptedPasswordBank } from './password-bank-storage'
 
 /**
  * hdwallet returns signature/pubkey fields as `Uint8Array | string`
@@ -111,6 +113,8 @@ function addressBookCertifyUnsupported(): boolean {
 
 const AUTHENTICATOR_SLOT_COUNT = 10
 const broadcastOnce = singleFlight<{ txid: string; addressBookEntryId?: string; recipientUnsaved?: boolean }>()
+const scanVolumesOnce = singleFlight<VolumeInventory>()
+const scanVolumes = () => scanVolumesOnce('mounted-volumes', scanVolumeInventory)
 
 function normalizeAuthenticatorLabel(value: unknown, field: string): string {
 	const normalized = String(value || '').trim()
@@ -316,10 +320,11 @@ import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
 import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
 import { createFilePendingStore } from "./monero-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata } from "../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata, btcAccountPath, zcashTransparentReceivePath } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
+import { assertAccountIndex, isPathElement } from "../shared/bip32-account"
 import { BtcAccountManager } from "./btc-accounts"
 import { alreadySigned, analyze as analyzePsbt, deriveAddress as deriveBtcAddress, feeFromPrevTxs, finalizeSigned, parseForBroadcast, toSignTx, type BtcPsbtScriptType, type PsbtAnalysis } from "./btc-psbt/psbt"
 import { accountPathFromXpub, formatPath, masterFingerprintFromDepth1Xpub, toSlip132, toStandardXpub, writeElectrumWallet } from "./btc-psbt/codec"
@@ -1104,37 +1109,111 @@ let watchOnlyViewRevision = 0
 let pendingPsbt: { id: string; stem: string; analysis: PsbtAnalysis | MultisigAnalysis; deviceId: string; hidden: boolean; epoch: number; wallet: unknown; signing: boolean } | null = null
 let lastSignedPsbtPath: string | null = null
 const multisigFeature = new MultisigFeature(getSetting,setSetting)
+function volumeDeviceStatus(): VolumeDeviceStatus {
+	const state = engine.getDeviceState()
+	if (!engine.wallet || state.state !== 'ready') return { available: false, reason: 'disconnected' }
+	if (engine.isEmulator) return { available: false, reason: 'emulator' }
+	if (isBitcoinOnlyVariant(state.firmwareVariant) || !supportsDeviceCipher(engine.wallet)) {
+		return { available: false, reason: 'unsupported' }
+	}
+	return { available: true, reason: 'ready' }
+}
+const volumes = createDesktopVolumeStore(async record => {
+	const wallet = engine.wallet
+	const state = engine.getDeviceState()
+	const epoch = activitySessionEpoch
+	const hidden = engine.isPassphraseWallet
+	return deriveVolumePassword(record, supportsDeviceCipher(wallet) ? wallet : null, {
+		state: state.state, firmwareVariant: state.firmwareVariant, isEmulator: engine.isEmulator,
+		isCurrent: () => wallet === engine.wallet && activitySessionEpoch === epoch && hidden === engine.isPassphraseWallet
+			&& state.deviceId === engine.getDeviceState().deviceId && volumeDeviceStatus().available,
+	})
+})
+function volumeProgress(operationId: string | undefined, event: VolumeProgressEvent): void {
+	if (typeof operationId !== 'string' || !operationId.length || operationId.length > 128) return
+	const send = rpc.send['volume-progress'] as (progress: VolumeProgress) => void
+	try { send({ operationId, ...event }) } catch { /* Webview closed during storage operation. */ }
+}
+function passwordBankDeviceSession(state: ReturnType<EngineController['getDeviceState']>) {
+	return `${activitySessionEpoch}:${state.deviceId}:${state.activeTransport}`
+}
+
+function getPasswordBankDevice() {
+	const wallet = engine.wallet
+	const state = engine.getDeviceState()
+	if (state.state !== 'ready' || !supportsDeviceCipher(wallet)) throw new Error('Connect and unlock a KeepKey to use the password bank')
+	if (isBitcoinOnlyVariant(state.firmwareVariant)) throw new Error('Password-bank derivation requires multi-chain firmware')
+	const isEmulator = engine.isEmulator
+	const session = passwordBankDeviceSession(state)
+	return {
+		session,
+		async cipher(addressNList: number[], key: string) {
+			const bytes = await passwordDeviceCipher(wallet, addressNList, key, isEmulator, emuSigningOp)
+			try {
+				deviceOperationContext.getStore()?.assertCurrent()
+				const current = engine.getDeviceState()
+				if (wallet !== engine.wallet || current.state !== 'ready' || session !== passwordBankDeviceSession(current)) {
+					throw new Error('The KeepKey wallet changed. Start the request again with the current wallet.')
+				}
+				return bytes
+			} catch (error) {
+				bytes.fill(0)
+				throw error
+			}
+		},
+	}
+}
+
+let passwordScope: { wallet: typeof engine.wallet; session: string; value: string } | undefined
+function getPasswordBankScope() {
+	const scope = passwordScope
+	if (!scope || scope.wallet !== engine.wallet) return null
+	const state = engine.getDeviceState()
+	return state.state === 'ready' && scope.session === passwordBankDeviceSession(state) ? scope.value : null
+}
+
+async function getLegacyPasswordBankScope() {
+	const cachedScope = getWalletDbScope()?.walletId
+	if (cachedScope) return cachedScope
+	const wallet = engine.wallet
+	const { deviceId } = engine.getDeviceState()
+	if (!deviceId || typeof wallet?.ethGetAddress !== 'function') return null
+	// The earlier preview keyed its bank by the primary ETH address. Read it
+	// only during explicit recovery and leave the app's wallet identity alone.
+	const result = await wallet.ethGetAddress({
+		addressNList: [0x8000002c, 0x8000003c, 0x80000000, 0, 0],
+		showDisplay: false,
+	}).catch(() => null)
+	deviceOperationContext.getStore()?.assertCurrent()
+	const address = typeof result === 'string' ? result : result?.address
+	return typeof address === 'string' && address ? `${deviceId}:${address.toLowerCase()}` : null
+}
+
 const passwordBank = new PasswordBank({
 	read: getSetting,
 	write: setSetting,
+	walletScope: getPasswordBankScope,
+	legacyWalletScope: getLegacyPasswordBankScope,
+	withDeviceUnlock: action => engine.withDeviceOperation(async () => {
+		if (!getPasswordBankScope()) {
+			const wallet = engine.wallet
+			const { deviceId } = engine.getDeviceState()
+			const { session, cipher } = getPasswordBankDevice()
+			if (!deviceId) throw new Error('Wait for Vault to verify the connected KeepKey wallet, then try again.')
+			const selector = await passwordWalletSelector(cipher)
+			passwordScope = { wallet, session, value: `${deviceId}:${selector}` }
+		}
+		return action()
+	}, { unlock: true, rejectIfBusy: true, origin: 'desktop' }),
 	replace: (key, value, expected) => {
 		const db = getDb()
 		if (!db) throw new Error('Password-bank storage is unavailable')
-		const result = expected === null
-			? db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING', [key, value])
-			: db.run('UPDATE settings SET value = ? WHERE key = ? AND value = ?', [value, key, expected])
-		return result.changes === 1
+		return replaceEncryptedPasswordBank(db, key, value, expected)
 	},
-	device: () => {
-		const wallet = engine.wallet as any
-		const state = engine.getDeviceState()
-		if (!wallet || state.state !== 'ready' || typeof wallet.cipherKeyValue !== 'function') throw new Error('Connect and unlock a KeepKey to use the password bank')
-		if (isBitcoinOnlyVariant(state.firmwareVariant)) throw new Error('Password-bank derivation requires multi-chain firmware')
-		return {
-			session: `${activitySessionEpoch}:${state.deviceId}:${engine.isPassphraseWallet}`,
-			cipher: (addressNList, key) => passwordDeviceCipher(wallet, addressNList, key, engine.isEmulator, emuSigningOp),
-		}
-	},
+	device: getPasswordBankDevice,
 })
 // Clean expired session secrets even when the password tab is not visible.
-const passwordBex = new PasswordBex(passwordBank, { browsers: listBrowsers, call: (tool, args, browser) => callBex(tool, args, browser, 10000) })
-const passwordAgent = new PasswordAgent(passwordBank, passwordBex, approval => {
-	// The legacy schema declares outgoing events under bun.messages; constrain
-	// this event to that payload despite Electrobun inferring remote messages.
-	const send = rpc.send['password-agent-approval'] as (value: VaultRPCSchema['bun']['messages']['password-agent-approval']) => void
-	try { send({ approval }) } catch { /* native UI not ready; request will expire */ }
-})
-setInterval(() => { if (!passwordBank.view().unlocked) passwordAgent.cancelPending() }, 1000).unref()
+setInterval(() => { passwordBank.view() }, 1000).unref()
 const multisigRegistry = new MultisigRegistry(getSetting, setSetting, () => ({
 	hidden: engine.isPassphraseWallet,
 	epoch: activitySessionEpoch,
@@ -1846,6 +1925,12 @@ function passkeyUserLabels(): Record<string, string> {
 	try { const v = JSON.parse(getSetting('passkey_labels') || '{}'); return v && typeof v === 'object' ? v : {} } catch { return {} }
 }
 
+/** Tell the UI about a setting the backend changed on its own, so a view that read its settings earlier (or whose read
+ *  failed) does not keep showing the old flags (audit v6 H10). */
+function notifySettingsChanged() {
+	try { rpc.send['settings-changed'](getAppSettings()) } catch { /* webview not ready: it reads settings when it mounts */ }
+}
+
 function getAppSettings() {
 	const servers = getPioneerServers()
 	const activeBase = getPioneerApiBase()
@@ -2209,7 +2294,6 @@ async function resolveDeviceSwapAsset(key: string) {
 
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
-	passwordAgent,
 	onApiLog: (entry: ApiLogEntry) => {
 		if (entryIsStale(entry)) {
 			console.warn(`[api-log] dropped ${entry.method} ${entry.route}: wallet session changed mid-request`)
@@ -3382,6 +3466,8 @@ const activeWalletWatches = createActiveWalletWatch({
 	}, isCurrent)),
 	onStatus: status => { try { rpc.send['stream-status'](status) } catch { /* renderer optional */ } },
 	onError: error => console.warn('[wallet-watch] Refresh failed:', error instanceof Error ? error.message : error),
+	onRetryScheduled: (chainId, delayMs, failures, cause) => console.warn(`[wallet-watch] ${chainId} will retry alone in ${Math.round(delayMs / 1000)}s (${cause === 'activity' ? 'new activity after a pause' : `consecutive failure ${failures}`}); other chains continue`),
+	onRetryPaused: (chainId, failures) => console.warn(`[wallet-watch] ${chainId} failed ${failures} times in a row; it now retries only on new activity, other chains continue`),
 	onOverflow: omitted => console.warn(`[wallet-watch] ${omitted} entries exceed the active lease limit`),
 })
 
@@ -5409,6 +5495,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				await engine.wipeDevice(engine.isEmulator ? emuConfirmOp : undefined)
 				return { success: true }
 			},
+			cancelDeferredWipe: async () => { engine.cancelDeferredWipe() },
 			getPublicKeys: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				const scope = currentBalanceRefreshScope()
@@ -5791,6 +5878,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			btcWatchOnlyShowAddress: async (params) => {
 				const deviceId = String(params?.deviceId || '')
 				const index = Number(params?.index)
+				// deriveBtcAddress below already refuses this; checking first gives a clear error before the device is asked anything.
+				assertAccountIndex(index, 'Address index')
 				if (!(await watchOnlyDeviceMatch(deviceId))) throw new Error('The connected KeepKey does not hold this wallet')
 				const { account } = watchOnlyReceiveAccount(deviceId)
 				const address = deriveBtcAddress(account, 0, index)
@@ -8617,7 +8706,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				const account = params?.account ?? 0
 				const wallet = engine.wallet
-				const path = [0x80000000 + 44, 0x80000000 + 133, 0x80000000 + account, 0, 0]
+				const path = zcashTransparentReceivePath(account)
 				const addressResult = await wallet.btcGetAddress({
 					addressNList: path, coin: "Zcash", scriptType: "p2pkh", showDisplay: false,
 				})
@@ -8986,7 +9075,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setPasswordManagerEnabled: async (params) => {
-				passwordAgent.cancelPending()
 				passwordBank.setEnabled(params?.enabled)
 				return getAppSettings()
 			},
@@ -9030,23 +9118,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { ok: true as const }
 			},
 			passwordBankStatus: async () => passwordBank.view(),
-			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
-			passwordBankLock: async () => { passwordAgent.cancelPending(); passwordBank.lock(); return passwordBank.view() },
+			getVolumeInventory: scanVolumes,
+			volumeDeviceStatus,
+			listVolumeImages: async () => volumes.listVolumeImages(await scanVolumes()),
+			createVolumeImage: params => volumes.createVolumeImage(params,
+				() => volumeProgress(params.operationId, { phase: 'creating' }),
+				record => volumeProgress(params.operationId, { phase: 'approval', keyLabel: volumeCipherKey(record) })),
+			unlockVolumeImage: params => volumes.unlockVolumeImage(params,
+				() => volumeProgress(params.operationId, { phase: 'unlocking' }),
+				record => volumeProgress(params.operationId, { phase: 'approval', keyLabel: volumeCipherKey(record) })),
+			openVolumeImage: params => volumes.openVolumeImage(params),
+			lockVolumeImage: params => volumes.lockVolumeImage(params),
+			deleteVolumeImage: params => volumes.deleteVolumeImage(params),
+			openExternalVolume: params => openExternalVolume(params),
+			openVolumeEncryptionSettings: () => openVolumeEncryptionSettings(),
+			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true, undefined, params?.recoverLegacy === true),
+			passwordBankLock: async () => { passwordBank.lock(); return passwordBank.view() },
 			passwordBankGenerate: async (params) => passwordBank.generate(params.count, params.ttlMinutes),
 			passwordBankAssign: async (params) => passwordBank.assign(params.origin, params.account, params.reviewDays),
 			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.pending === true, params.ttlMinutes),
 			passwordBankReveal: async (params) => passwordBank.reveal(params.id, params.pending === true),
+			passwordBankCopy: async (params) => {
+				const { password } = passwordBank.reveal(params.id, params.pending === true)
+				Utils.clipboardWriteText(password)
+				if (Utils.clipboardReadText() !== password) throw new Error('Clipboard unavailable')
+			},
 			passwordBankRotate: async (params) => passwordBank.rotate(params.id, params.action, params.confirmed === true),
-			passwordBankExport: async () => passwordBank.exportBackup(),
-			passwordBankSaveBackup: async () => savePasswordBackup(passwordBank, path.join(os.homedir(), "Documents", "KeepKey Password Backups")),
-			passwordBankBackupSaved: async (params) => passwordBank.acknowledgeBackup(params.revision),
 			passwordBankImport: async (params) => passwordBank.unlock(false, params.json),
-			passwordBankBrowserTargets: async (params) => passwordBex.discover(params.id),
-			passwordBankBrowserGrant: async (params) => passwordBex.grant(params),
-			passwordBankBrowserFill: async (params) => passwordBex.fill(params.grant),
-			passwordBankReportRisk: async (params) => passwordBank.reportRisk(params.id, params.kind, params.source),
-			passwordAgentApproveFill: async (params) => passwordAgent.approve(params.id),
-			passwordAgentRejectFill: async (params) => { passwordAgent.reject(params.id) },
 			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
 			// never shows again (also set when the OOB passphrase card is completed).
 			markPassphraseIntroShown: async () => {
@@ -9438,7 +9536,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const entry = addExternalEntry({
 					walletId: scope.walletId, deviceId: scope.deviceId,
 					networkId: chain.networkId, chainId: chain.id, chainFamily: chain.chainFamily,
-					address, label: ensName || params.label || null, ensName, cosigner: params.cosigner,
+					// No typed name is undefined, not null: db then keeps the contact's
+					// current name (and falls back to the ENS name for a new one).
+					address, label: params.label?.trim() || undefined, ensName, cosigner: params.cosigner,
 				})
 				if (entry) {
 					// Certified contacts are labeled external EVM entries: a co-signer save that keeps the label changes none.
@@ -9583,7 +9683,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (btcXpubs.some(x => x.xpub === p.xpub && x.scriptType === p.scriptType)) continue
 					let account = 0
 					try { const b = bs58.decode(p.xpub); account = new DataView(b.buffer, b.byteOffset).getUint32(9) & 0x7FFFFFFF } catch {}
-					btcXpubs.push({ xpub: p.xpub, scriptType: p.scriptType, path: [PURPOSE[p.scriptType] | 0x80000000, 0x80000000, account | 0x80000000] })
+					btcXpubs.push({ xpub: p.xpub, scriptType: p.scriptType, path: btcAccountPath(PURPOSE[p.scriptType], account) })
 				}
 				console.log(`[generateReport] btcXpubs total (loaded + cached): ${btcXpubs.length}`)
 				if (btcXpubs.length === 0) console.warn('[generateReport] No BTC xpubs found anywhere — BTC sections will be skipped')
@@ -10892,7 +10992,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (!chainSupportsDeepScan(chain)) throw new Error(`${chain.symbol} doesn't support custom-path search`)
 				const path = params.addressNList
-				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
+				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !isPathElement(n))) {
 					throw new Error('Invalid derivation path')
 				}
 				const { method, params: dp } = deriveAddressParams(chain, path)
@@ -10915,7 +11015,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const results: any[] = []
 				for (const path of paths) {
 					if (engine.wallet !== captured) break
-					if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) continue
+					if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !isPathElement(n))) continue
 					const { method, params: dp } = deriveAddressParams(chain, path)
 					if (params.scriptType) dp.scriptType = params.scriptType
 					let address = ''
@@ -10939,7 +11039,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (chain.chainFamily !== 'utxo') throw new Error(`${chain.symbol} can't be swept this way`)
 				const path = params.addressNList
-				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
+				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !isPathElement(n))) {
 					throw new Error('Invalid derivation path')
 				}
 				const captured = engine.wallet
@@ -10992,7 +11092,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (!chainSupportsDeepScan(chain)) throw new Error(`${chain.symbol} doesn't support path inspection`)
 				const path = params.addressNList
-				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
+				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !isPathElement(n))) {
 					throw new Error('Invalid derivation path')
 				}
 				const { method, params: dp } = deriveAddressParams(chain, path)
@@ -11812,6 +11912,7 @@ engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
 	// The Studio provider key belongs to the device it was derived with.
 	providerKeySession.onDeviceState(state)
+	if (state.state !== 'ready') passwordScope = undefined
 	if (state.state === 'disconnected' || state.state === 'bootloader' || state.state === 'error') passwordBank.lock()
 	const bitcoinOnly = isBitcoinOnlyVariant(state.firmwareVariant)
 	// Scope the self-host node to the connected device: only a btc-only device may
@@ -11897,6 +11998,7 @@ engine.on('state-change', (state) => {
 		const hasZcashFirmware = !bitcoinOnly && !!fw && versionCompare(fw, ZCASH_NU7_MIN_FIRMWARE) >= 0
 		const zcashSidecarBinary = findZcashCliBinary()
 		const hasZcashPrivacy = hasZcashFirmware && supportsZcashPrivacyBuild(fw, zcashSidecarBinary)
+		const flagsChanged = zcashPrivacyEnabled !== hasZcashPrivacy || hiveEnabled !== has715
 		if (zcashPrivacyEnabled !== hasZcashPrivacy) {
 			zcashPrivacyEnabled = hasZcashPrivacy
 			setSetting('zcash_privacy_enabled', hasZcashPrivacy ? '1' : '0')
@@ -11915,6 +12017,7 @@ engine.on('state-change', (state) => {
 			setSetting('hive_enabled', has715 ? '1' : '0')
 			console.log(`[settings] Hive auto-${has715 ? 'enabled' : 'disabled'} — firmware ${fw || 'unknown'}`)
 		}
+		if (flagsChanged) notifySettingsChanged()
 	}
 	if (state.state === 'ready') { startPioneerSocketIfAllowed(); bootstrapActiveWalletWatches() }
 	const btcBackendForHistory = getBtcBackend()
@@ -12192,7 +12295,7 @@ const url = await getMainViewUrl()
 // ── Application Menu (required for Cmd+C/V clipboard in WKWebView on macOS) ──
 // On Windows, Electrobun renders a menu bar but macOS roles are no-ops — hide it.
 function updateApplicationMenu() {
-if (process.platform === 'win32') return
+if (process.platform !== 'darwin') return
 const text = (source: string) => backendText(getSetting('app_language'), source)
 ApplicationMenu.setApplicationMenu([
 	{

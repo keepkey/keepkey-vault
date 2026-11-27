@@ -25,7 +25,6 @@ import { isBitcoinOnlyVariant } from "../shared/flags"
 import { useOnline } from "./hooks/useOnline"
 import { useBtcNodeStatus } from "./hooks/useBtcNodeStatus"
 import { useBtcMultisigEnabled } from "./hooks/useBtcMultisigEnabled"
-import { PasswordAgentApprovalDialog } from './components/PasswordAgentApprovalDialog'
 import { OfflineBanner } from "./components/OfflineBanner"
 import { NodeStatusBar } from "./components/NodeStatusBar"
 import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
@@ -55,6 +54,8 @@ import { IncomingTxToast, type IncomingTx } from "./components/IncomingTxToast"
 import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage, rpcFire } from "./lib/rpc"
+import { useAppSettingsLoader } from "./hooks/useAppSettingsLoader"
+import { dispatchBackendSettingsChanged } from "./lib/app-settings-loader"
 import { CHAINS, customChainToChainDef, findChainByNetwork, isChainSupported, type ChainDef } from "../shared/chains"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { Z } from "./lib/z-index"
@@ -218,19 +219,21 @@ function App() {
 	}, [])
 
 
+	// A failed read is retried instead of leaving Zcash/Hive hidden until something else changes (audit v6 H10).
+	const refreshSettings = useAppSettingsLoader((s: AppSettings) => {
+		setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode); setBtcOnboardingSeen(s.btcOnboardingShown); setBtcNodeEnabledSetting(s.btcNodeEnabled); setNetworksChosen(s.networksChosen); setDisabledNetworks(s.disabledNetworks); setZcashEnabled(s.zcashPrivacyEnabled)
+		if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
+	}, 30000)
+
+	// The backend changes some flags itself (Zcash/Hive follow the device firmware). Its push becomes the same window
+	// event the UI dispatches, so every settings reader refreshes.
+	useEffect(() => onRpcMessage('settings-changed', () => dispatchBackendSettingsChanged('push')), [])
+
 	// Fetch app version + REST API state on mount
 	useEffect(() => {
 		rpcRequest<{ version: string; channel: string }>("getAppVersion")
 			.then(setAppVersion)
 			.catch(() => {})
-		const refreshSettings = () => {
-			rpcRequest<AppSettings>("getAppSettings")
-				.then((s) => {
-					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode); setBtcOnboardingSeen(s.btcOnboardingShown); setBtcNodeEnabledSetting(s.btcNodeEnabled); setNetworksChosen(s.networksChosen); setDisabledNetworks(s.disabledNetworks); setZcashEnabled(s.zcashPrivacyEnabled)
-					if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
-				})
-				.catch(() => {})
-		}
 		refreshSettings()
 		// Other surfaces (settings drawer close, drop-zone dylib install) flip
 		// server-side flags then dispatch this event so the React tree picks up
@@ -239,7 +242,7 @@ function App() {
 		return () => window.removeEventListener("keepkey-settings-changed", refreshSettings)
 		// hiveEnabled is derived from the connected device's firmware, so refetch
 		// whenever the reported version changes (connect / swap / upgrade).
-	}, [deviceState.firmwareVersion])
+	}, [deviceState.firmwareVersion, refreshSettings])
 
 	// Re-offer a skipped firmware update on every reconnect: clear the skip flag
 	// once the device is fully unplugged so the next connect routes back through
@@ -994,7 +997,6 @@ function App() {
 	) : null
 
 	const pairingOverlay = <>
-		<PasswordAgentApprovalDialog />
 		{pairRequest && <PairingApproval request={pairRequest} onApprove={handleApprovePairing} onReject={handleRejectPairing} />}
 	</>
 
@@ -1002,8 +1004,12 @@ function App() {
 		<PassphraseEntry onSubmit={handlePassphraseSubmit} onCancel={handlePassphraseCancel} />
 	) : null
 
-	const pinOverlay = pinRequestType && !passphraseRequested ? (
-		<PinEntry type={pinRequestType} failed={pinFailed} errorDetail={pinErrorDetail} requestSeq={pinRequestSeq} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} deviceAsking={deviceState.pinPromptOpen ?? true} />
+	const waitingForPin = deviceState.state === "needs_pin" && deviceState.pinUnlockWaiting
+	const wipeDeferred = deviceState.wipePending === "replug"
+	const pinOverlay = (pinRequestType || waitingForPin || wipeDeferred) && !passphraseRequested ? (
+		<PinEntry type={pinRequestType ?? "current"} failed={pinFailed} errorDetail={pinErrorDetail} requestSeq={pinRequestSeq} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe}
+			deviceAsking={!!pinRequestType && (deviceState.pinPromptOpen ?? true)} wipeDeferred={wipeDeferred}
+			onCancelDeferredWipe={() => rpcRequest("cancelDeferredWipe")} />
 	) : null
 
 	const charOverlay = (charRequest || recoveryError) ? (
@@ -1360,9 +1366,7 @@ function App() {
 				open={settingsOpen}
 				onClose={() => {
 					setSettingsOpen(false)
-					rpcRequest<AppSettings>("getAppSettings")
-						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode) })
-						.catch(() => {})
+					// refreshSettings (the retrying loader) listens for this and re-reads every flag.
 					window.dispatchEvent(new Event("keepkey-settings-changed"))
 				}}
 				deviceState={deviceState}

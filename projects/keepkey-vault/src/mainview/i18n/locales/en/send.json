@@ -94,5 +94,22 @@
 	"recipientContractNote": "This address is a smart contract. Make sure it can receive {{symbol}}: funds sent to a contract that cannot handle them may be lost.",
 	"customGasPriceTooHigh": "Gas price is 10x or more the network price ({{gwei}} gwei). Lower it or use a preset.",
 	"customGasPriceTooLow": "Gas price is below the network base fee (~{{gwei}} gwei). The transaction would never confirm.",
-	"gasPriceUnavailable": "The network gas price could not be loaded, so Desktop will not guess a fee. Try again in a moment."
+	"amountBelowDust": "Amount is below the minimum the network accepts. Send at least {{minimum}} {{symbol}}.",
+	"maxBelowDust": "After fees, the amount to send is below the minimum the network accepts ({{minimum}} {{symbol}}). Add funds or lower the fee.",
+	"gasPriceUnavailable": "The network gas price could not be loaded, so Desktop will not guess a fee. Try again in a moment.",
+	"insufficientAmountAndFee": "Not enough {{symbol}} to cover the amount and the network fee.",
+	"insufficientAfterFees": "Nothing is left to send after the network fee.",
+	"insufficientToken": "Not enough token balance for this amount.",
+	"insufficientTokenAmount": "Not enough balance: {{available}} available, {{requested}} requested.",
+	"insufficientGas": "Not enough {{symbol}} for the network fee: you have {{have}} {{symbol}} and need about {{need}} {{symbol}}.",
+	"insufficientGasForMax": "The balance does not cover the network fee.",
+	"insufficientAmountAndGas": "Not enough {{symbol}}: you have {{have}} {{symbol}} and need {{need}} {{symbol}}, including the network fee.",
+	"insufficientAmount": "Not enough {{symbol}}: you have {{have}} {{symbol}} and need {{need}} {{symbol}}.",
+	"insufficientAmountAndFeeNoSymbol": "The balance does not cover the amount plus the network fee. Send a smaller amount or lower the fee.",
+	"insufficientDogeMinimumFee": "Not enough DOGE to cover the 1 DOGE minimum network fee.",
+	"insufficientZcashMinimumFee": "Not enough ZEC to cover the minimum network fee of {{fee}} ZEC.",
+	"insufficientZcashMinimumFeeExact": "Not enough ZEC to cover the minimum network fee of {{fee}} ZEC. Try sending a slightly smaller amount.",
+	"insufficientXrpReserve": "Not enough XRP after the account reserve and the network fee.",
+	"insufficientTronMaxReserve": "Not enough TRX to send the maximum after keeping {{reserve}} TRX for network fees.",
+	"exceedsBalanceWithFee": "The amount plus the network fee ({{fee}} {{symbol}}) is more than the available balance ({{balance}} {{symbol}})."
 }

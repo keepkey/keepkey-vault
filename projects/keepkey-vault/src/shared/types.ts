@@ -76,6 +76,7 @@ export interface DeviceStateInfo {
   wipePending?: 'replug' | 'confirm'
   /** The device is showing its PIN grid and waiting for the PIN; false while it counts down after wrong PINs. */
   pinPromptOpen?: boolean
+  pinUnlockWaiting?: boolean
   /** Why installing each official build may wipe or lock this device's wallet
    *  (see flashWipeReason); undefined = it does not. The install must carry an
    *  explicit acknowledgement when set. */
@@ -977,7 +978,6 @@ export interface EvmAddressSet {
 export interface BuildTxResult {
   unsignedTx: any
   fee: string
-  feeUsd?: number
 }
 
 export interface BroadcastResult {
@@ -2690,7 +2690,9 @@ export type SwapUiCommand =
 
 // ── Recent Activity types ──────────────────────────────────────────────
 
-export type ActivityType = 'send' | 'receive' | 'swap' | 'sign' | 'message' | 'approve' | 'shield' | 'unshield'
+/** 'contract': an on-chain call that moved no native value (a contract call,
+ *  a token-only interaction or a 0-value transfer), seen by the history scan. */
+export type ActivityType = 'send' | 'receive' | 'swap' | 'sign' | 'message' | 'approve' | 'shield' | 'unshield' | 'contract'
 export type ActivitySource = 'app' | 'api' | 'scan'
 
 export interface RecentActivity {

@@ -19,6 +19,8 @@ interface PinEntryProps {
 	onSubmit: (pin: string) => void
 	onCancel: () => void
 	onWipe?: () => Promise<void>
+	wipeDeferred?: boolean
+	onCancelDeferredWipe?: () => Promise<void>
 	/** False while the device counts down after wrong PINs: it reads nothing, so typed PINs are lost. */
 	deviceAsking?: boolean
 }
@@ -69,7 +71,7 @@ const PIN_ANIMATIONS = `
  * The device screen shows scrambled numbers; the user taps
  * position-based buttons (1-9) on this grid.
  */
-export function PinEntry({ type = "current", failed, errorDetail, requestSeq, onSubmit, onCancel, onWipe, deviceAsking = true }: PinEntryProps) {
+export function PinEntry({ type = "current", failed, errorDetail, requestSeq, onSubmit, onCancel, onWipe, deviceAsking = true, wipeDeferred = false, onCancelDeferredWipe }: PinEntryProps) {
   const uiText = useUiTranslation()
 
 	const { t } = useTranslation("device")
@@ -79,6 +81,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 	const [wipeAcknowledged, setWipeAcknowledged] = useState(false)
 	const [wiping, setWiping] = useState(false)
 	const [wipeError, setWipeError] = useState<string | null>(null)
+	const showingWipe = showWipeConfirm || wipeDeferred
 
 	// Show error banner when failed prop becomes true
 	useEffect(() => {
@@ -128,6 +131,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 
 	// Keyboard support: 1-9 digits, backspace, enter
 	useEffect(() => {
+		if (showingWipe) return
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key >= "1" && e.key <= "9") {
 				handleDigit(e.key)
@@ -139,7 +143,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 		}
 		window.addEventListener("keydown", onKeyDown)
 		return () => window.removeEventListener("keydown", onKeyDown)
-	}, [handleDigit, handleBackspace, handleSubmit])
+	}, [showingWipe, handleDigit, handleBackspace, handleSubmit])
 
 	// KeepKey PIN pad layout: 7 8 9 / 4 5 6 / 1 2 3
 	const rows = [
@@ -206,7 +210,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 					<DocsLink href={watch('intro-more-forgot-pin')} label={uiText("Watch video")} />
 				</Flex>
 
-				{!showWipeConfirm && (<>
+				{!showingWipe && (<>
 				{/* Incorrect PIN error banner */}
 				{showError && type === "current" && (
 					<Box
@@ -335,7 +339,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 				</Flex>
 			</>)}
 
-				{type === "current" && !showWipeConfirm && (
+				{type === "current" && !showingWipe && (
 					<>
 						<Button
 							onClick={onCancel}
@@ -367,7 +371,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 				)}
 
 				{/* Wipe confirmation panel */}
-				{showWipeConfirm && (
+				{showingWipe && (
 					<Box
 						mt="4"
 						p="4"
@@ -410,7 +414,14 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 								color="kk.textSecondary"
 								_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
 								flex={1}
-								onClick={() => { setShowWipeConfirm(false); setWipeAcknowledged(false) }}
+								onClick={async () => {
+									try {
+										if (wipeDeferred) await onCancelDeferredWipe?.()
+										setShowWipeConfirm(false)
+										setWipeAcknowledged(false)
+										setWipeError(null)
+									} catch (e: any) { setWipeError(e?.message || String(e)) }
+								}}
 								disabled={wiping}
 							>
 								{t("cancel", { ns: "common" })}
@@ -424,7 +435,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 								_active={{ transform: "scale(0.97)" }}
 								flex={1}
 								onClick={handleWipe}
-								disabled={!wipeAcknowledged || wiping}
+								disabled={!wipeAcknowledged || wiping || wipeDeferred}
 							>
 								{wiping ? t("pin.wiping") : t("pin.wipeDevice")}
 							</Button>
@@ -434,6 +445,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 								{t("pin.wipeConfirmOnDevice")}
 							</Text>
 						)}
+						{wipeDeferred && !wipeError && <Text fontSize="xs" color="kk.gold" mt="3">{t("replugToWipe", { ns: "nav" })}</Text>}
 						{wipeError && (
 							<Text fontSize="xs" color="kk.error" mt="3">
 								{t("pin.wipeFailed", { error: wipeError })}

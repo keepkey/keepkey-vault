@@ -2575,9 +2575,13 @@
                     "type": "string",
                     "enum": [
                       "p2pkh",
-                      "p2wpkh",
+                      "cashaddr",
+                      "p2sh",
                       "p2sh-p2wpkh",
-                      "p2tr"
+                      "p2wpkh",
+                      "p2tr",
+                      "p2wsh",
+                      "p2sh-p2wsh"
                     ]
                   },
                   "coin_name": {
@@ -4828,7 +4832,8 @@
                   "accountIndex": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Account N. Bitcoin: any account added in Desktop. Other UTXO chains: any N when scriptType is given, else only 0. Non-UTXO chains: only 0."
+                    "maximum": 2147483647,
+                    "description": "Account N, from 0 to 2147483647 (2^31 - 1); larger is 400 INVALID_REQUEST. Bitcoin: any account added in Desktop. Other UTXO chains: any N when scriptType is given, else only 0. Non-UTXO chains: only 0."
                   },
                   "scriptType": {
                     "type": "string",

@@ -1,4 +1,4 @@
-import {hasMultisigSigningData,btcMultisigEnabled,BTC_MULTISIG_DISABLED} from './btc-psbt/multisig-feature'
+import {hasMultisigSigningData,btcMultisigEnabled,BTC_MULTISIG_DISABLED,deviceScriptType} from './btc-psbt/multisig-feature'
 import { signUtxoTx } from './txbuilder/zcash-transparent'
 import type { EngineController } from './engine-controller'
 import { takeDeviceRefusal } from './device-refusal'
@@ -35,10 +35,9 @@ import {
   ensureFvkLoaded, displayOrchardAddressOnDevice, sendShielded,
 } from './txbuilder/zcash-shielded'
 import { isSidecarReady, getCachedFvk } from './zcash-sidecar'
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import { swaggerJson } from './api-docs-spec'
 import * as S from './schemas'
-import { parseRequest, validateResponse } from './validate'
+import { parseRequest, validateResponse, validationErrorMessage } from './validate'
 import { SIGNING_ROUTES, requiredSigningFields } from './signing-routes'
 import {
   bitcoinOnlyActivityList,
@@ -85,7 +84,6 @@ import {
 } from './txbuilder/ton'
 import { usb } from 'usb'
 import { handleMcpRequest } from './mcp'
-import { passwordAgentHttp, type PasswordAgent } from './password-agent'
 import { onBexOpen, onBexClose, onBexMessage } from './bex-bridge'
 import { simulateEvmEffects } from './evm-effects'
 import { simulateSolanaEffects } from './solana-effects'
@@ -133,7 +131,6 @@ export type RestActivityTag = { txid?: string; chain?: string; activityType?: st
 
 export interface RestApiCallbacks {
   getSyncDiagnostics?: () => unknown
-  passwordAgent?: PasswordAgent
   onApiLog: (entry: ApiLogEntry) => void
   /** Activity rows changed outside onApiLog (e.g. a REST history rebuild). */
   onActivityChanged?: () => void
@@ -512,28 +509,28 @@ async function findEthAddressNList(
   throw new HttpError(400, `Could not find addressNList for ${fromAddress} (scanned 5 accounts)`)
 }
 
-// ── Load swagger.json once ─────────────────────────────────────────────
-let swaggerContent: string | null = null
-function getSwagger(): string {
-  if (!swaggerContent) {
-    try {
-      swaggerContent = readFileSync(join(__dirname, 'swagger.json'), 'utf-8')
-    } catch {
-      swaggerContent = JSON.stringify({ error: 'swagger.json not found' })
-    }
-  }
-  return swaggerContent
+// ── Serve swagger.json (bundled with the backend, see api-docs-spec.ts) ──
+export function getSwagger(): string {
+  return swaggerJson()
 }
 
+// Swagger UI comes from the CDN at an exact version with Subresource Integrity: the docs page runs on the wallet API's
+// own origin and holds the developer's API key, so a changed or hijacked file must not run there (audit v6 D1).
+// To upgrade, take a release at least two weeks old, check the unpkg files match the npm tarball, and update both hashes.
+export const SWAGGER_UI_VERSION = '5.34.1'
+const SWAGGER_UI_BASE = `https://unpkg.com/swagger-ui-dist@${SWAGGER_UI_VERSION}`
+export const SWAGGER_UI_CSS = { href: `${SWAGGER_UI_BASE}/swagger-ui.css`, integrity: 'sha384-4c3vsE5f+trhFyHrFrLM1fFGUn531NIaC7dcqEWIJdoRQJ5CkJbSuSCwXLpaS1KF' }
+export const SWAGGER_UI_JS = { src: `${SWAGGER_UI_BASE}/swagger-ui-bundle.js`, integrity: 'sha384-XFYN47VzPiDY6qPtxYKg0nqUeW/upo20xf1j2SUE7gT/i35FJB4cuS/71Iegzk8Z' }
+
 // ── Branded Swagger UI HTML ───────────────────────────────────────────
-function getSwaggerUiHtml(): string {
+export function getSwaggerUiHtml(): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>KeepKey Vault &mdash; Developer Center</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <link rel="stylesheet" href="${SWAGGER_UI_CSS.href}" integrity="${SWAGGER_UI_CSS.integrity}" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <style>
     *{box-sizing:border-box}
     body{margin:0;background:#0d1117;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif}
@@ -939,7 +936,7 @@ function getSwaggerUiHtml(): string {
     <div id="swagger-ui"></div>
   </div>
 
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="${SWAGGER_UI_JS.src}" integrity="${SWAGGER_UI_JS.integrity}" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script>
     var STORAGE_KEY='kk_dev_apikey'
     var swaggerLoaded=false
@@ -987,12 +984,18 @@ function getSwaggerUiHtml(): string {
       document.getElementById('explorer-gate').style.display='none'
       document.getElementById('swagger-ui').style.display='block'
       if(swaggerLoaded)return
+      if(typeof SwaggerUIBundle==='undefined'){
+        // The pinned Swagger UI did not load: offline, or its bytes no longer match the integrity hash (then the
+        // browser blocks it on purpose). Say so instead of leaving an empty page.
+        document.getElementById('swagger-ui').textContent='The API explorer could not load (Swagger UI ${SWAGGER_UI_VERSION} from unpkg.com). Check your connection and reload. The spec is at /spec/swagger.json.'
+        return
+      }
       swaggerLoaded=true
       SwaggerUIBundle({
         url:'/spec/swagger.json',
         dom_id:'#swagger-ui',
         deepLinking:true,
-        presets:[SwaggerUIBundle.presets.apis,SwaggerUIBundle.SwaggerUIStandalonePreset],
+        presets:[SwaggerUIBundle.presets.apis],
         layout:'BaseLayout',
         requestInterceptor:function(req){
           var live=getKey()
@@ -1415,6 +1418,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         return null
       }
 
+      // Retired password routes stop before the API request recorder.
+      if (path === '/api/v1/passwords' || path.startsWith('/api/v1/passwords/')) {
+        return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store' } })
+      }
+
       // ── MCP agent bridge (EPIC_mcp_agent_bridge.md, keepkey-client) ──
       // LOOPBACK + LOCAL-AGENT ONLY, handled BEFORE the shared CORS/OPTIONS
       // path below so /mcp owns its own preflight and never inherits the
@@ -1434,18 +1442,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       // /bex-bridge stays token-gated (the extension is a chrome-extension://
       // origin needing a valid pairing key; https→ws://localhost is
       // mixed-content-blocked for web pages regardless).
-      if (path.startsWith('/api/v1/passwords')) {
-        const ip = server.requestIP(req)?.address
-        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip || '') || req.headers.has('origin') || req.headers.has('sec-fetch-site')) {
-          return new Response(JSON.stringify({ error: 'Password API is for paired local agents, not browser fetches' }), { status: 403, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
-        }
-        try { auth.requireAuth(req) }
-        catch { return new Response(JSON.stringify({ error: 'Pair with Vault first' }), { status: 401, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }) }
-        // Password metadata must not flow through the generic request/response
-        // audit recorder or become a browser-origin CORS response.
-        server.timeout(req, 0)
-        return passwordAgentHttp(req, callbacks?.passwordAgent)
-      }
       if (path === '/mcp' || path === '/bex-bridge') {
         const ip = server.requestIP(req)?.address
         const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
@@ -1497,7 +1493,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               { status: typeof err?.status === 'number' ? err.status : 401,
                 headers: { 'Content-Type': 'application/json' } })
           }
-          return handleMcpRequest(req, {}, callbacks?.passwordAgent)
+          return handleMcpRequest(req, {})
         }
         return new Response(JSON.stringify({ error: 'POST only' }),
           { status: 405, headers: { 'Content-Type': 'application/json' } })
@@ -1851,6 +1847,35 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               'keys seen:', Object.keys(probeCheckBody || {}),
             )
             return json({ error: `Missing signing payload — expected one of: ${requiredAny.join(', ')}` }, 400)
+          }
+
+          // A UTXO request the handler would refuse (schema: paths, multisig
+          // cosigner suffixes, shape) is refused here with the handler's own
+          // 400, before the wallet is unlocked or the approval card opens, so
+          // the user is never asked to approve a request that cannot be signed.
+          // Runs after the probe check above, so an empty body keeps that
+          // distinctive gate error (rest-sign-gating.test.ts relies on it).
+          // Multisig while the feature is off keeps its 403 and its "enable it"
+          // hint, ahead of the schema, as it had before this check existed.
+          if (path === '/utxo/sign-transaction') {
+            if (hasMultisigSigningData(probeCheckBody) && !btcMultisigEnabled(getSetting)) {
+              // This gate runs before device access. Keep the policy refusal
+              // in the audit log while preserving passphrase-wallet privacy.
+              if (!engine.isPassphraseWallet) {
+                const { deviceId, firmwareVersion } = engine.getDeviceState()
+                const draft = observeSigningInfo({
+                  id: crypto.randomUUID(), method: path, appName: resolveAppInfo().appName,
+                  rawRequestBody: probeCheckBody, firmwareVersion,
+                })
+                if (draft) {
+                  const observation = insertClearSignObservation(draft, { deviceId, source: 'rest-api' })
+                  finalizeClearSignObservation(observation.id, 'policy-blocked', 'btc-multisig-disabled')
+                }
+              }
+              throw new HttpError(403, BTC_MULTISIG_DISABLED)
+            }
+            const parsed = S.UtxoSignTransactionRequest.safeParse(probeCheckBody)
+            if (!parsed.success) return json({ error: validationErrorMessage(parsed.error) }, 400)
           }
 
           await requireWallet(engine)
@@ -3383,16 +3408,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // BCH: prepend bitcoincash: prefix to output addresses
           if (coin === 'BitcoinCash' && body.outputs) {
             for (const out of body.outputs) {
-              if (out.address && !out.address.startsWith('bitcoincash:')) {
+              if (typeof out.address === 'string' && out.address && !out.address.startsWith('bitcoincash:')) {
                 out.address = 'bitcoincash:' + out.address
               }
             }
           }
 
+          // Segwit multisig (p2wsh, p2sh-p2wsh) reaches the device as p2wpkh /
+          // p2sh-p2wpkh with its multisig object; the schema required one.
+          const toDevice = (entry: any) => entry.scriptType === undefined ? entry : { ...entry, scriptType: deviceScriptType(entry.scriptType) }
           const result = await emuWrap(() => signUtxoTx(wallet, {
             coin,
-            inputs: body.inputs,
-            outputs: body.outputs,
+            inputs: body.inputs.map(toDevice),
+            outputs: body.outputs.map(toDevice),
             version: body.version ?? 1,
             locktime: body.locktime ?? 0,
             ...(body.overwintered !== undefined ? { overwintered: body.overwintered } : {}),
@@ -4074,7 +4102,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             curve: body.ecdsa_curve_name || 'secp256k1',
             showDisplay: sd,
             coin: body.coin_name || 'Bitcoin',
-            scriptType: body.script_type,
+            // A multisig account's key is its standard xpub, as for p2sh (hdwallet
+            // sends p2sh as p2pkh here too); the device has no p2wsh key format.
+            scriptType: body.script_type === 'p2wsh' || body.script_type === 'p2sh-p2wsh' ? 'p2pkh' : body.script_type,
           }]), { operation: 'getPublicKeys', chain: 'Bitcoin' }, sd)
           const xpub = result?.[0]?.xpub
           const out = { xpub }

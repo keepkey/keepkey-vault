@@ -107,21 +107,83 @@ function normalizeActivityType(tx: any): ActivityType {
 }
 
 // Pioneer returns to/from as arrays of addresses (occasionally a string or
-// {address} objects). Collapse to one display string: a single address, or
-// "addr +N" when a tx fans out to several (common for UTXO change outputs).
-function normalizeAddressField(field: any): string | undefined {
-  if (!field) return undefined
+// {address} objects).
+function addressList(field: any): string[] {
+  if (!field) return []
   const arr = Array.isArray(field) ? field : [field]
-  const addrs = arr
+  return arr
     .map(a => (typeof a === 'string' ? a : a?.address || a?.addr || ''))
     .map(s => String(s).trim())
     .filter(Boolean)
+}
+
+// Collapse to one display string: a single address, or "addr +N" when a tx
+// fans out to several (common for UTXO change outputs).
+function normalizeAddressField(field: any): string | undefined {
+  const addrs = addressList(field)
   if (addrs.length === 0) return undefined
   if (addrs.length === 1) return addrs[0]
   return `${addrs[0]} +${addrs.length - 1}`
 }
 
-export function normalizeMeta(tx: any, activityType = normalizeActivityType(tx), chain?: ChainDef) {
+// EVM hex addresses are case-insensitive (EIP-55 is only a checksum); other
+// account formats (lowercase bech32, case-sensitive base58) compare exactly.
+function sameAccountAddress(a: string, b: string): boolean {
+  const hex = /^0x[0-9a-f]{40}$/i
+  return hex.test(a) && hex.test(b) ? a.toLowerCase() === b.toLowerCase() : a === b
+}
+
+/** Chain families whose history query is the account address itself, in a
+ *  single canonical form, so a tx sender can be compared with it. Hive queries
+ *  by public key; TON and TRON addresses have several encodings. */
+const SENDER_COMPARABLE_FAMILIES = new Set(['evm', 'cosmos', 'xrp', 'solana'])
+
+/** The wallet's own address to compare tx senders with, or undefined when the
+ *  provider's direction is all we can go by (UTXO xpubs, Hive, TON, TRON). */
+export function historyOwnAddress(chain: Pick<ChainDef, 'chainFamily'>, queryPubkey: string): string | undefined {
+  return SENDER_COMPARABLE_FAMILIES.has(chain.chainFamily) ? queryPubkey : undefined
+}
+
+/**
+ * Type of a history tx from the wallet's side, and whether the wallet paid its
+ * fee (audit v6 R5). The fee belongs to whoever sent the tx.
+ *
+ * Without ownAddress (see historyOwnAddress) or a sender in the record, the
+ * provider's direction decides and a declared send keeps its fee.
+ *
+ * On cosmos, xrp and solana, from/to are message-level (a reward withdrawal is
+ * from and to us; an SPL send may list our token account), so they only add a
+ * fee: a receive from a tx we signed shows the fee we paid. The type stays the
+ * provider's, and a declared send keeps its fee.
+ *
+ * On EVM, from is the tx signer and to the tx recipient, so:
+ * - The fee is ours only when we sent the tx, even if the provider calls it a
+ *   send: in an address-poisoning transferFrom the attacker sends and pays.
+ * - A tx we sent to our own address is a self-send: a send, even when the
+ *   provider calls it received. So is a 0-value tx we sent (our contract
+ *   call), which keeps it in "Sent" and in the blind-signing prior-use count.
+ * - A native row someone else sent that moved no value (a contract interaction
+ *   or a 0-value "poisoning" transfer) is a contract call, never "Received 0".
+ */
+export function classifyHistoryTx(tx: any, ownAddress?: string, nativeCaip?: string): { type: ActivityType; walletPaidFee: boolean } {
+  const direction = normalizeActivityType(tx)
+  const self = String(tx?.direction || '').toLowerCase() === 'self'
+  if (self) return { type: 'send', walletPaidFee: true }
+  const senders = addressList(tx?.from)
+  if (!ownAddress || senders.length === 0) return { type: direction, walletPaidFee: direction === 'send' }
+
+  const ours = (field: any) => addressList(field).some(a => sameAccountAddress(a, ownAddress))
+  const fromOwn = ours(tx.from)
+  if (!/^0x[0-9a-f]{40}$/i.test(ownAddress)) return { type: direction, walletPaidFee: fromOwn || direction === 'send' }
+
+  const nativeRow = !tx.caip || !nativeCaip || tx.caip === nativeCaip
+  const zeroNative = nativeRow && tx.value != null && String(tx.value).trim() !== '' && Number(tx.value) === 0
+  if (fromOwn && (zeroNative || ours(tx.to))) return { type: 'send', walletPaidFee: true }
+  if (!fromOwn && zeroNative) return { type: 'contract', walletPaidFee: false }
+  return { type: direction, walletPaidFee: fromOwn }
+}
+
+export function normalizeMeta(tx: any, activityType = normalizeActivityType(tx), chain?: ChainDef, walletPaidFee = activityType !== 'receive') {
   return {
     // Absent ≠ zero: a tx returned by the HISTORY endpoint is already on-chain.
     // Defaulting a missing field to 0 falsely renders "Unconfirmed" (red) forever
@@ -132,9 +194,11 @@ export function normalizeMeta(tx: any, activityType = normalizeActivityType(tx),
     blockHeight: tx.blockHeight || tx.block_height || tx.height || 0,
     value: tx.value != null ? String(tx.value) : undefined,
     // THOR/Maya history reports the auth fee ('0'); the network charges its
-    // native fee at the bank layer on every send (audit v4 H10).
-    fee: withNativeTxFee(tx.fee != null ? String(tx.fee) : undefined, activityType, chain),
-    direction: activityType === 'send' ? 'sent' : 'received',
+    // native fee at the bank layer on every send (audit v4 H10). A fee the
+    // wallet did not pay (someone else sent the tx) is not ours to show.
+    walletPaidFee,
+    fee: walletPaidFee ? withNativeTxFee(tx.fee != null ? String(tx.fee) : undefined, activityType, chain) : undefined,
+    direction: activityType === 'send' ? 'sent' : activityType === 'contract' ? 'contract' : 'received',
     // Counterparties Pioneer already provides per tx — previously discarded, so
     // historical/received txs showed no addresses in the detail panel.
     to: normalizeAddressField(tx.to),
@@ -353,11 +417,12 @@ export async function rebuildActivityHistory(params: {
           }
           seenTxids.add(txid)
 
-          const activityType = normalizeActivityType(tx)
+          const ownAddress = historyOwnAddress(chain, query.pubkey)
+          const { type: activityType, walletPaidFee } = classifyHistoryTx(tx, ownAddress, chain.caip)
           const timestamp = normalizeTimestamp(tx)
           const route = `history/${chain.id}`
           const meta = {
-            ...normalizeMeta(tx, activityType, chain),
+            ...normalizeMeta(tx, activityType, chain, walletPaidFee),
             nativeReceiveVerified: verifiedNativeReceive(tx, chain.caip),
             chainId: chain.id,
             chainSymbol: chain.symbol,

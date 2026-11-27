@@ -3,7 +3,7 @@ import { Button, Flex, Input, Text } from '@chakra-ui/react'
 import { rpcRequest } from '../lib/rpc'
 import { useUiTranslation } from '../i18n/ui'
 
-/** Native-only reveal. The masked view never fetches the password. */
+/** Explicit reveal loads the display value. Copy writes through native Vault. */
 export function PasswordValue({ id, pending, disabled, beforeReveal }: {
   id: string; pending: boolean; disabled: boolean; beforeReveal: () => Promise<void>
 }) {
@@ -23,7 +23,7 @@ export function PasswordValue({ id, pending, disabled, beforeReveal }: {
   }, [])
   useEffect(() => {
     if (!value) return
-    const timer = setTimeout(hide, Math.max(0, value.expiresAt - Date.now()))
+    const timer = setTimeout(() => setValue(null), Math.max(0, value.expiresAt - Date.now()))
     return () => clearTimeout(timer)
   }, [value])
   const toggle = async () => {
@@ -40,9 +40,20 @@ export function PasswordValue({ id, pending, disabled, beforeReveal }: {
     finally { if (mounted.current) setBusy(false) }
   }
   const copy = async () => {
-    if (!value || Date.now() >= value.expiresAt) { hide(); return }
-    try { await navigator.clipboard.writeText(value.password); if (mounted.current) setMessage(uiText('Copied')) }
-    catch { if (mounted.current) setMessage(uiText('Clipboard unavailable')) }
+    if (busy || disabled) return
+    const request = ++sequence.current
+    const isCurrent = () => mounted.current && sequence.current === request && !document.hidden
+    setBusy(true); setMessage('')
+    try {
+      await beforeReveal()
+      if (!isCurrent()) return
+      await rpcRequest<void>('passwordBankCopy', { id, pending }, undefined, isCurrent)
+      if (isCurrent()) setMessage(uiText('Copied'))
+    } catch (error) {
+      if (isCurrent()) setMessage(error instanceof Error ? error.message : uiText('Clipboard unavailable'))
+    } finally {
+      if (mounted.current) setBusy(false)
+    }
   }
   return <Flex direction="column" gap="1" mt="3" maxW="370px">
     <Flex gap="1" align="center">
@@ -50,7 +61,7 @@ export function PasswordValue({ id, pending, disabled, beforeReveal }: {
       <Button size="sm" variant="ghost" color="kk.textSecondary" aria-label={value ? uiText('Hide password') : uiText('Show password')} aria-pressed={!!value} disabled={busy || disabled} onClick={() => void toggle()}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" />{value && <path d="m3 3 18 18" />}</svg>
       </Button>
-      <Button size="sm" variant="ghost" color="kk.textSecondary" aria-label={uiText('Copy password')} disabled={busy || disabled || !value} onClick={() => void copy()}>
+      <Button size="sm" variant="ghost" color="kk.textSecondary" aria-label={uiText('Copy password')} disabled={busy || disabled} onClick={() => void copy()}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h3" /></svg>
       </Button>
     </Flex>

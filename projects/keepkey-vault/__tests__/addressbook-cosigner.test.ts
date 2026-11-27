@@ -92,7 +92,9 @@ describe('address book co-signer flag', () => {
 describe('ENS contact storage', () => {
   test('stores the resolved address, ENS label and provenance across rename and re-save', () => {
     const address = '0x4444444444444444444444444444444444444444'
-    const e = add(address, { label: 'Ignored label', ensName: 'alice.eth' })
+    // Without a typed name the ENS name is the label; a typed one wins (KEEPKEY-176,
+    // addressbook-ens-label.test.ts).
+    const e = add(address, { ensName: 'alice.eth' })
     expect(e.address).toBe(address)
     expect(e.label).toBe('alice.eth')
     expect(e.ensName).toBe('alice.eth')

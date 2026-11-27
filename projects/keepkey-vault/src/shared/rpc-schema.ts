@@ -1,7 +1,8 @@
 import type { SyncProgress } from './sync-progress'
 import type { MoneroSendReview, MoneroStatus, EmulatorBuildInfo, EmulatorNextBuild } from './types'
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
-import type { PasswordBankView, PasswordBrowserTarget, PasswordRiskKind, PasswordAgentApproval } from './password-bank'
+import type { PasswordBankView } from './password-bank'
+import type { VolumeDeleteTarget, VolumeDestination, VolumeDeviceStatus, VolumeImage, VolumeImageTarget, VolumeInventory, VolumeProgress } from './volumes'
 import type { ElectrobunRPCSchema } from 'electrobun/main'
 import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
 import type { VaultIdentity } from './vault-identity'
@@ -104,6 +105,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // route through here instead. Bun shells out to the OS-native opener.
       openExternal: { params: { url: string }; response: { ok: true } }
       wipeDevice: { params: void; response: any }
+      cancelDeferredWipe: { params: void; response: void }
       // Sends a Cancel message to the device — aborts whatever confirm/PIN/
       // passphrase prompt is on screen and frees the transport lock so the
       // user can back out of an in-flight signing flow without unplugging.
@@ -351,23 +353,25 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       passkeysDelete: { params: { pin: string; credentialId: string }; response: { ok: true } }
       passkeysSetLabel: { params: { rpHash: string; label: string }; response: { ok: true } }
       passwordBankStatus: { params: void; response: PasswordBankView }
-      passwordBankUnlock: { params: { create?: boolean }; response: PasswordBankView }
+      getVolumeInventory: { params: void; response: VolumeInventory }
+      volumeDeviceStatus: { params: void; response: VolumeDeviceStatus }
+      listVolumeImages: { params: void; response: VolumeImage[] }
+      createVolumeImage: { params: { name: string; sizeMiB: number; destination?: VolumeDestination; operationId?: string }; response: void }
+      unlockVolumeImage: { params: VolumeImageTarget & { operationId?: string }; response: void }
+      openVolumeImage: { params: VolumeImageTarget; response: void }
+      lockVolumeImage: { params: VolumeImageTarget; response: void }
+      deleteVolumeImage: { params: VolumeDeleteTarget; response: void }
+      openExternalVolume: { params: { id: string; uuid: string | null }; response: void }
+      openVolumeEncryptionSettings: { params: void; response: void }
+      passwordBankUnlock: { params: { create?: boolean; recoverLegacy?: boolean }; response: PasswordBankView }
       passwordBankLock: { params: void; response: PasswordBankView }
       passwordBankGenerate: { params: { count: number; ttlMinutes: number }; response: PasswordBankView }
       passwordBankAssign: { params: { origin: string; account: string; reviewDays: number }; response: PasswordBankView }
       passwordBankRehydrate: { params: { id: string; pending?: boolean; ttlMinutes: number }; response: PasswordBankView }
       passwordBankReveal: { params: { id: string; pending?: boolean }; response: { password: string; expiresAt: number } }
+      passwordBankCopy: { params: { id: string; pending?: boolean }; response: void }
       passwordBankRotate: { params: { id: string; action: 'prepare' | 'submitted' | 'verify' | 'cancel'; confirmed?: boolean }; response: PasswordBankView }
-      passwordBankSaveBackup: { params: void; response: { filePath: string; revision: number } }
-      passwordBankExport: { params: void; response: { json: string; revision: number } }
-      passwordBankBackupSaved: { params: { revision: number }; response: PasswordBankView }
       passwordBankImport: { params: { json: string }; response: PasswordBankView }
-      passwordBankBrowserTargets: { params: { id: string }; response: PasswordBrowserTarget[] }
-      passwordBankBrowserFill: { params: { grant: string }; response: { filled: true; submitted: false } }
-      passwordBankBrowserGrant: { params: { id: string; pending?: boolean; browser: string; tabId: number; documentToken: string; ref: string }; response: { grant: string } }
-      passwordBankReportRisk: { params: { id: string; kind: PasswordRiskKind; source: 'user' | 'chrome-password-checkup' }; response: PasswordBankView }
-      passwordAgentApproveFill: { params: { id: string }; response: { id: string; state: string; expiresAt: number; error?: string } }
-      passwordAgentRejectFill: { params: { id: string }; response: void }
       markPassphraseIntroShown: { params: void; response: AppSettings }
       markBtcOnboardingShown: { params: void; response: AppSettings }
       setDisabledNetworks: { params: { chainIds: string[] }; response: AppSettings }
@@ -662,12 +666,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         unresolvedErrorCount?: number
       }
       'pair-request': PairingRequestInfo
-      'password-agent-approval': { approval: PasswordAgentApproval | null }
       'pair-dismissed': Record<string, never>
       'signing-request': SigningRequestInfo
       'signing-dismissed': { id: string }
       'api-log': ApiLogEntry
       'report-progress': { id: string; message: string; percent: number }
+      'volume-progress': VolumeProgress
       // Live per-path progress for the audit "unusual paths" (sweep) scan, so the
       // panel can stream what it's checking. scanId scopes it to one scan.
       'audit-sweep-progress': {
@@ -739,6 +743,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
        *  `chain` is CAIP-19, `networkId` is CAIP-2 — networkId is the reliable key. */
       'tx-push-received': { chain?: string; networkId?: string; address?: string; txid?: string; type?: 'incoming' | 'outgoing' | 'confirmed' | 'activity'; balanceRefreshHandled?: boolean }
       'pioneer-server-changed': AppSettings
+      /** The backend changed a setting on its own (Zcash/Hive follow the connected firmware). The UI re-reads its settings. */
+      'settings-changed': AppSettings
       /** SSE event-stream connection status. 'connected' = watching addresses; 'disconnected' = no stream. */
       'stream-status': { connected: boolean; watching: number; sessionId?: string }
       'token-visibility-changed': { caip: string; status: 'visible' | 'hidden' | null }

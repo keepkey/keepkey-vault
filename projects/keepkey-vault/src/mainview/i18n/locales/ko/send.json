@@ -80,5 +80,22 @@
 	"recipientContractNote": "이 주소는 스마트 컨트랙트입니다. {{symbol}}을(를) 받을 수 있는지 확인하세요. 처리할 수 없는 컨트랙트로 보낸 자금은 사라질 수 있습니다.",
 	"customGasPriceTooHigh": "가스 가격이 네트워크 가격({{gwei}} gwei)의 10배 이상입니다. 낮추거나 프리셋을 사용하세요.",
 	"customGasPriceTooLow": "가스 가격이 네트워크 기본 수수료(약 {{gwei}} gwei)보다 낮습니다. 트랜잭션이 확인되지 않습니다.",
-	"gasPriceUnavailable": "네트워크 가스 가격을 불러오지 못해 Desktop이 수수료를 추측하지 않습니다. 잠시 후 다시 시도하세요."
+	"amountBelowDust": "금액이 네트워크가 허용하는 최소 금액보다 적습니다. 최소 {{minimum}} {{symbol}} 이상 보내세요.",
+	"maxBelowDust": "수수료를 빼면 보낼 금액이 네트워크가 허용하는 최소 금액({{minimum}} {{symbol}})보다 적습니다. 잔액을 추가하거나 수수료를 낮추세요.",
+	"gasPriceUnavailable": "네트워크 가스 가격을 불러오지 못해 Desktop이 수수료를 추측하지 않습니다. 잠시 후 다시 시도하세요.",
+	"insufficientAmountAndFee": "금액과 네트워크 수수료를 내기에 {{symbol}}이(가) 부족합니다.",
+	"insufficientAfterFees": "네트워크 수수료를 빼면 보낼 금액이 남지 않습니다.",
+	"insufficientToken": "이 금액을 보내기에 토큰 잔액이 부족합니다.",
+	"insufficientTokenAmount": "잔액 부족: 사용 가능 {{available}}, 요청 {{requested}}.",
+	"insufficientGas": "네트워크 수수료를 내기에 {{symbol}}이(가) 부족합니다. 보유 {{have}} {{symbol}}, 필요 약 {{need}} {{symbol}}.",
+	"insufficientGasForMax": "잔액으로 네트워크 수수료를 낼 수 없습니다.",
+	"insufficientAmountAndGas": "{{symbol}}이(가) 부족합니다. 보유 {{have}} {{symbol}}, 네트워크 수수료 포함 필요 {{need}} {{symbol}}.",
+	"insufficientAmount": "{{symbol}}이(가) 부족합니다. 보유 {{have}} {{symbol}}, 필요 {{need}} {{symbol}}.",
+	"insufficientAmountAndFeeNoSymbol": "잔액으로 금액과 네트워크 수수료를 낼 수 없습니다. 더 적은 금액을 보내거나 수수료를 낮추세요.",
+	"insufficientDogeMinimumFee": "최소 네트워크 수수료 1 DOGE를 내기에 DOGE가 부족합니다.",
+	"insufficientZcashMinimumFee": "최소 네트워크 수수료 {{fee}} ZEC를 내기에 ZEC가 부족합니다.",
+	"insufficientZcashMinimumFeeExact": "최소 네트워크 수수료 {{fee}} ZEC를 내기에 ZEC가 부족합니다. 조금 더 적은 금액을 보내 보세요.",
+	"insufficientXrpReserve": "계정 준비금과 네트워크 수수료를 빼면 XRP가 부족합니다.",
+	"insufficientTronMaxReserve": "네트워크 수수료로 {{reserve}} TRX를 남겨 두면 최대 금액을 보내기에 TRX가 부족합니다.",
+	"exceedsBalanceWithFee": "금액과 네트워크 수수료({{fee}} {{symbol}})의 합이 사용 가능한 잔액({{balance}} {{symbol}})을 넘습니다."
 }

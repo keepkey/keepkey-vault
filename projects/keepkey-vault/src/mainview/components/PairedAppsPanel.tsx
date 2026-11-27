@@ -7,6 +7,7 @@ import { Z } from "../lib/z-index"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import type { PairedAppInfo } from "../../shared/types"
+import { getDateLocale } from '../lib/date-locale'
 
 interface PairedAppsPanelProps {
 	open: boolean
@@ -54,7 +55,7 @@ function AppLogo({ name, imageUrl }: { name: string; imageUrl?: string }) {
 function formatDate(ts: number): string {
 	if (!ts) return "—"
 	const d = new Date(ts)
-	return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+	return d.toLocaleDateString(getDateLocale(), { month: "short", day: "numeric", year: "numeric" })
 }
 
 export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {

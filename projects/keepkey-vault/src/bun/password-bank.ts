@@ -1,21 +1,27 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto'
-import { PASSWORD_BANK_ALGORITHM, passwordOrigin, type PasswordBankBackup, type PasswordBankView, type PasswordProfile, type PasswordRiskKind } from '../shared/password-bank'
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
+import { PASSWORD_BANK_ALGORITHM, PASSWORD_CACHE_MAX_MINUTES, passwordOrigin, type PasswordBankBackup, type PasswordBankView, type PasswordProfile } from '../shared/password-bank'
 
 export const PASSWORD_BANK_SETTING = 'password_bank_v1'
 export const PASSWORD_BANK_FLAG = 'password_manager_enabled'
 const MAX_SLOTS = 4096
-const MAX_CACHE_MS = 24 * 60 * 60 * 1000
-const SESSION_MS = 15 * 60 * 1000
-interface Registry {
-  version: 1
+
+function scopedBankSetting(scope: string): string {
+  return `${PASSWORD_BANK_SETTING}:${createHash('sha256').update(scope).digest('hex')}`
+}
+/** A cached password lives inside the unlock session and never outlasts it, so
+ *  the longest cache is the session itself. The session is not extended. */
+const SESSION_MS = PASSWORD_CACHE_MAX_MINUTES * 60 * 1000
+export { PASSWORD_CACHE_MAX_MINUTES }
+// Preserve older backups' risk metadata inside the encrypted registry.
+type StoredPasswordProfile = PasswordProfile & { riskFindings?: unknown }
+type Registry = {
   bankId: string
   algorithm: typeof PASSWORD_BANK_ALGORITHM
   revision: number
-  backedUpRevision: number
   nextSlot: number
   ready: number[]
-  profiles: PasswordProfile[]
-}
+  profiles: StoredPasswordProfile[]
+} & ({ version: 1; symbolFromSlot?: never } | { version: 2; symbolFromSlot: number })
 interface Device {
   /** Stable for this wallet/passphrase SESSION, invalidated on seed/session changes. */
   session: string
@@ -26,9 +32,54 @@ interface Dependencies {
   write: (key: string, value: string) => void
   replace?: (key: string, value: string, expected: string | null) => boolean
   device: () => Device
+  walletScope?: () => string | null
+  legacyWalletScope?: () => Promise<string | null>
+  withDeviceUnlock?: <T>(action: () => Promise<T>) => Promise<T>
   now?: () => number
 }
 type Cache = { bytes: Buffer; expiresAt: number }
+
+const PASSWORD_LENGTH = 24
+const ALPHANUMERIC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+const SYMBOLS = '!@#$%^&*'
+
+function usesSymbolFormat(registry: Registry, slot: number): boolean {
+  return registry.version === 2 && slot >= registry.symbolFromSlot
+}
+
+function formatSymbolPassword(entropy: Buffer): Buffer {
+  const key = new Uint8Array(entropy.buffer, entropy.byteOffset, entropy.byteLength)
+  let block = Buffer.alloc(0), offset = 0, counter = 0
+  const sample = (size: number) => {
+    const limit = Math.floor(256 / size) * size
+    for (;;) {
+      if (offset === block.length) {
+        block.fill(0)
+        block = createHmac('sha256', key).update(`keepkey-password-bank/v2/symbol-password/${counter++}`).digest()
+        offset = 0
+      }
+      const value = block[offset++]
+      if (value < limit) return value % size
+    }
+  }
+  const password = Buffer.alloc(PASSWORD_LENGTH)
+  try {
+    const symbolPosition = sample(password.length)
+    password[symbolPosition] = SYMBOLS.charCodeAt(sample(SYMBOLS.length))
+    // Sample uniformly from strings that contain all three alphanumeric classes.
+    let classes: number
+    do {
+      classes = 0
+      for (let index = 0; index < password.length; index++) {
+        if (index === symbolPosition) continue
+        const character = sample(ALPHANUMERIC.length)
+        password[index] = ALPHANUMERIC.charCodeAt(character)
+        classes |= character < 26 ? 1 : character < 52 ? 2 : 4
+      }
+    } while (classes !== 7)
+    return password
+  } finally { block.fill(0) }
+}
 
 /** Device PRF compatibility scheme, explicitly not BIP85. Nothing invokes a
  * device while the flag is off. Only encrypted registry metadata is persisted;
@@ -41,16 +92,12 @@ export class PasswordBank {
   private epoch = 0
   private busy = false
   private persisted: string | null = null
+  private registrySetting: string | null = null
   private cache = new Map<number, Cache>()
   private now: () => number
   constructor(private deps: Dependencies) { this.now = deps.now || Date.now }
 
   get enabled() { return this.deps.read(PASSWORD_BANK_FLAG) === '1' }
-  capture() {
-    this.active()
-    const epoch = this.epoch
-    return () => { this.active(); if (this.epoch !== epoch) throw new Error('Password session changed. Review the fill again.') }
-  }
   setEnabled(enabled: boolean) {
     if (typeof enabled !== 'boolean') throw new Error('enabled must be a boolean')
     this.save(PASSWORD_BANK_FLAG, enabled ? '1' : '0')
@@ -60,12 +107,17 @@ export class PasswordBank {
     this.deps.write(key, value)
     if (this.deps.read(key) !== value) throw new Error('Could not save the password bank')
   }
-  private saveRegistry(value: string, expected = this.persisted) {
+  private bankSetting() {
+    if (!this.deps.walletScope) return PASSWORD_BANK_SETTING
+    const scope = this.deps.walletScope()
+    return scope ? scopedBankSetting(scope) : null
+  }
+  private saveRegistry(setting: string, value: string, expected = this.persisted) {
     const saved = this.deps.replace
-      ? this.deps.replace(PASSWORD_BANK_SETTING, value, expected)
-      : this.deps.read(PASSWORD_BANK_SETTING) === expected
+      ? this.deps.replace(setting, value, expected)
+      : this.deps.read(setting) === expected
     if (!saved) { this.lock(); throw new Error('Password bank changed in another window. Unlock and review it again.') }
-    if (!this.deps.replace) this.save(PASSWORD_BANK_SETTING, value)
+    if (!this.deps.replace) this.save(setting, value)
     this.persisted = value
   }
   lock() {
@@ -76,6 +128,7 @@ export class PasswordBank {
     this.session = null
     this.deadline = 0
     this.persisted = null
+    this.registrySetting = null
     for (const c of this.cache.values()) c.bytes.fill(0)
     this.cache.clear()
   }
@@ -85,7 +138,11 @@ export class PasswordBank {
   private active() {
     this.guard()
     if (!this.registry || !this.key) throw new Error('Unlock the password bank with KeepKey first')
-    if (this.deps.read(PASSWORD_BANK_SETTING) !== this.persisted) {
+    if (!this.registrySetting || this.bankSetting() !== this.registrySetting) {
+      this.lock()
+      throw new Error('Unlock the password bank with KeepKey first')
+    }
+    if (this.deps.read(this.registrySetting) !== this.persisted) {
       this.lock(); throw new Error('Password bank changed in another window. Unlock it again.')
     }
     if (this.now() >= this.deadline || this.deps.device().session !== this.session) {
@@ -117,31 +174,35 @@ export class PasswordBank {
   private seal(registry: Registry, key = this.key!): PasswordBankBackup {
     const iv = randomBytes(12)
     const cipher = createCipheriv('aes-256-gcm', new Uint8Array(key), new Uint8Array(iv))
-    cipher.setAAD(new TextEncoder().encode(`keepkey-password-bank/1/${registry.bankId}`))
-    const plaintext = Buffer.from(JSON.stringify(registry))
+    cipher.setAAD(new TextEncoder().encode(`keepkey-password-bank/${registry.version}/${registry.bankId}`))
+    // Earlier Vault versions expect this field in both envelope versions.
+    const plaintext = Buffer.from(JSON.stringify({ backedUpRevision: -1, ...registry }))
     try {
       const ciphertext = Buffer.concat([new Uint8Array(cipher.update(new Uint8Array(plaintext))), new Uint8Array(cipher.final())])
-      return { format: 'keepkey-password-bank', version: 1, bankId: registry.bankId, iv: iv.toString('base64'), ciphertext: ciphertext.toString('base64'), tag: cipher.getAuthTag().toString('base64') }
+      return { format: 'keepkey-password-bank', version: registry.version, bankId: registry.bankId, iv: iv.toString('base64'), ciphertext: ciphertext.toString('base64'), tag: cipher.getAuthTag().toString('base64') }
     } finally { plaintext.fill(0) }
   }
   private parseBackup(value: string): PasswordBankBackup {
     if (typeof value !== 'string' || value.length > 2_000_000) throw new Error('Invalid or oversized backup')
     const b = JSON.parse(value)
-    if (b?.format !== 'keepkey-password-bank' || b.version !== 1 || !/^[a-f0-9]{32}$/.test(b.bankId)) throw new Error('Unsupported password-bank backup')
+    if (b?.format !== 'keepkey-password-bank' || (b.version !== 1 && b.version !== 2) || !/^[a-f0-9]{32}$/.test(b.bankId)) throw new Error('Unsupported password-bank backup')
     for (const field of ['iv', 'ciphertext', 'tag']) if (typeof b[field] !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(b[field])) throw new Error('Invalid encrypted backup')
     if (Buffer.from(b.iv, 'base64').length !== 12 || Buffer.from(b.tag, 'base64').length !== 16) throw new Error('Invalid encrypted backup')
     return b
   }
   private open(b: PasswordBankBackup, key: Buffer): Registry {
     const decipher = createDecipheriv('aes-256-gcm', new Uint8Array(key), new Uint8Array(Buffer.from(b.iv, 'base64')))
-    decipher.setAAD(new TextEncoder().encode(`keepkey-password-bank/1/${b.bankId}`))
+    decipher.setAAD(new TextEncoder().encode(`keepkey-password-bank/${b.version}/${b.bankId}`))
     decipher.setAuthTag(new Uint8Array(Buffer.from(b.tag, 'base64')))
     let plain: Buffer
     try { plain = Buffer.concat([new Uint8Array(decipher.update(new Uint8Array(Buffer.from(b.ciphertext, 'base64')))), new Uint8Array(decipher.final())]) }
-    catch { throw new Error('Backup could not be opened. Use the same seed and wallet passphrase; check the backup for damage.') }
+    catch { throw new Error('This encrypted bank could not be verified for the current KeepKey wallet.') }
     try {
       const r = JSON.parse(plain.toString('utf8')) as Registry
-      if (r.version !== 1 || r.bankId !== b.bankId || r.algorithm !== PASSWORD_BANK_ALGORITHM || !Number.isSafeInteger(r.revision) || r.revision < 0 || !Number.isSafeInteger(r.backedUpRevision) || r.backedUpRevision > r.revision || !Number.isSafeInteger(r.nextSlot) || r.nextSlot < 0 || r.nextSlot > MAX_SLOTS || !Array.isArray(r.profiles) || !Array.isArray(r.ready) || r.profiles.length > MAX_SLOTS) throw new Error('Invalid password-bank registry')
+      if (r.version !== b.version || r.bankId !== b.bankId || r.algorithm !== PASSWORD_BANK_ALGORITHM || !Number.isSafeInteger(r.revision) || r.revision < 0 || !Number.isSafeInteger(r.nextSlot) || r.nextSlot < 0 || r.nextSlot > MAX_SLOTS || !Array.isArray(r.profiles) || !Array.isArray(r.ready) || r.profiles.length > MAX_SLOTS) throw new Error('Invalid password-bank registry')
+      if (r.version === 2) {
+        if (!Number.isSafeInteger(r.symbolFromSlot) || r.symbolFromSlot < 0 || r.symbolFromSlot >= r.nextSlot) throw new Error('Invalid password format boundary')
+      } else if (r.symbolFromSlot !== undefined) throw new Error('Invalid password format boundary')
       const allocated = new Set<number>()
       const ids = new Set<string>()
       const use = (slot: number) => {
@@ -152,10 +213,6 @@ export class PasswordBank {
       for (const p of r.profiles) {
         if (typeof p.id !== 'string' || ids.has(p.id) || typeof p.account !== 'string' || !p.account.trim() || p.account.length > 200 || passwordOrigin(p.origin) !== p.origin || !['active', 'prepared', 'submitted'].includes(p.rotationState) || !Number.isSafeInteger(p.reviewDays) || p.reviewDays < 1 || p.reviewDays > 3650 || !Number.isFinite(p.createdAt) || (p.changedAt !== undefined && !Number.isFinite(p.changedAt))) throw new Error('Invalid password profile')
         ids.add(p.id); use(p.slot)
-        if (p.riskFindings !== undefined) {
-          if (!Array.isArray(p.riskFindings) || p.riskFindings.length > 100) throw new Error('Invalid risk history')
-          for (const f of p.riskFindings) if (!['compromised', 'reused', 'weak'].includes(f.kind) || !['user', 'chrome-password-checkup'].includes(f.source) || f.mode !== 'user-reported' || !Number.isFinite(f.observedAt) || (f.resolvedAt !== undefined && !Number.isFinite(f.resolvedAt)) || (f.slot !== null && (!Number.isSafeInteger(f.slot) || f.slot < 0 || f.slot >= r.nextSlot))) throw new Error('Invalid risk finding')
-        }
         if (p.pendingSlot !== undefined) use(p.pendingSlot)
         if ((p.rotationState === 'active') !== (p.pendingSlot === undefined)) throw new Error('Invalid rotation journal')
       }
@@ -165,7 +222,7 @@ export class PasswordBank {
   private commit(next: Registry) {
     this.active()
     next.revision++
-    this.saveRegistry(JSON.stringify(this.seal(next)))
+    this.saveRegistry(this.registrySetting!, JSON.stringify(this.seal(next)))
     this.registry = next
   }
   private copy() { return structuredClone(this.active()) }
@@ -174,6 +231,7 @@ export class PasswordBank {
     if (!p) throw new Error('Password profile not found')
     return p
   }
+
   view(): PasswordBankView {
     if (!this.enabled) { this.lock(); return this.empty(false) }
     if (this.registry) { try { this.active() } catch { this.lock() } }
@@ -181,31 +239,63 @@ export class PasswordBank {
     const r = this.registry
     return {
       enabled: true, exists: true, unlocked: true, bankId: r.bankId, algorithm: PASSWORD_BANK_ALGORITHM,
-      profiles: r.profiles.map(p => ({ ...p, cachedUntil: this.cache.get(p.slot)?.expiresAt, pendingCachedUntil: p.pendingSlot === undefined ? undefined : this.cache.get(p.pendingSlot)?.expiresAt, due: !p.changedAt || this.now() >= p.changedAt + p.reviewDays * 86400000 })),
-      readySlots: r.ready.map(slot => ({ slot, cachedUntil: this.cache.get(slot)?.expiresAt })),
-      backupRequired: r.backedUpRevision !== r.revision, revision: r.revision,
+      profiles: r.profiles.map(({ riskFindings: _riskFindings, ...profile }) => ({
+        ...profile,
+        cachedUntil: this.cache.get(profile.slot)?.expiresAt,
+        pendingCachedUntil: profile.pendingSlot === undefined ? undefined : this.cache.get(profile.pendingSlot)?.expiresAt,
+        due: !profile.changedAt || this.now() >= profile.changedAt + profile.reviewDays * 86400000,
+      })),
+      readySlots: r.ready.map(slot => ({
+        slot, symbolFormat: usesSymbolFormat(r, slot), cachedUntil: this.cache.get(slot)?.expiresAt,
+      })),
+      revision: r.revision,
     }
   }
   private empty(enabled: boolean): PasswordBankView {
-    return { enabled, exists: enabled && !!this.deps.read(PASSWORD_BANK_SETTING), unlocked: false, algorithm: PASSWORD_BANK_ALGORITHM, profiles: [], readySlots: [], backupRequired: false, revision: 0 }
+    const setting = enabled ? this.bankSetting() : null
+    return { enabled, exists: !!setting && !!this.deps.read(setting), walletPending: enabled && !setting, unlocked: false, algorithm: PASSWORD_BANK_ALGORITHM, profiles: [], readySlots: [], revision: 0 }
   }
-  async unlock(create = false, importJson?: string) {
+  async unlock(create = false, importJson?: string, recoverLegacy = false) {
     return this.exclusive(async () => {
       this.lock()
-      const stored = this.deps.read(PASSWORD_BANK_SETTING)
-      if (importJson !== undefined && stored) throw new Error('A password bank already exists. Import into a fresh Vault installation to avoid overwriting current locations.')
-      if (create && stored) throw new Error('A password bank already exists')
-      if (!create && !stored && importJson === undefined) throw new Error('Create a bank or import an encrypted backup first')
-      const backup = importJson !== undefined ? this.parseBackup(importJson) : stored ? this.parseBackup(stored) : null
-      const bankId = backup?.bankId || randomBytes(16).toString('hex')
-      const device = this.deps.device()
-      const key = await this.derive(bankId)
-      try {
-        const registry = backup ? this.open(backup, key) : { version: 1 as const, bankId, algorithm: PASSWORD_BANK_ALGORITHM, revision: 0, backedUpRevision: -1, nextSlot: 0, ready: [], profiles: [] }
-        this.saveRegistry(JSON.stringify(this.seal(registry, key)), stored)
-        this.key = key; this.registry = registry; this.session = device.session; this.deadline = this.now() + SESSION_MS
-        return this.view()
-      } catch (e) { key.fill(0); throw e }
+      const imported = importJson === undefined ? null : this.parseBackup(importJson)
+      const epoch = this.epoch
+      const unlock = async () => {
+        this.guard()
+        if (this.epoch !== epoch) throw new Error('Password bank changed during device unlock. Try again.')
+        const setting = this.bankSetting()
+        if (!setting) throw new Error('Wait for Vault to verify the connected KeepKey wallet, then try again.')
+        const stored = this.deps.read(setting)
+        if ((create || imported || recoverLegacy) && stored) throw new Error('A password bank already exists for this KeepKey wallet')
+        let legacy: string | null = null
+        if (recoverLegacy && this.deps.walletScope) {
+          const device = this.deps.device()
+          const previousScope = await this.deps.legacyWalletScope?.()
+          this.guard()
+          if (this.epoch !== epoch || this.bankSetting() !== setting || this.deps.device().session !== device.session) {
+            throw new Error('KeepKey wallet changed during password bank recovery. Try again.')
+          }
+          legacy = (previousScope ? this.deps.read(scopedBankSetting(previousScope)) : null) ?? this.deps.read(PASSWORD_BANK_SETTING)
+        }
+        if (!create && !stored && !imported && !legacy) {
+          if (recoverLegacy) throw new Error('No previous password bank is available to restore.')
+          return this.view()
+        }
+        const saved = stored ?? legacy
+        const backup = imported ?? (saved ? this.parseBackup(saved) : null)
+        const bankId = backup?.bankId || randomBytes(16).toString('hex')
+        const device = this.deps.device()
+        const key = await this.derive(bankId)
+        try {
+          const registry = backup ? this.open(backup, key) : { version: 1 as const, bankId, algorithm: PASSWORD_BANK_ALGORITHM, revision: 0, nextSlot: 0, ready: [], profiles: [] }
+          if (this.bankSetting() !== setting) throw new Error('KeepKey wallet changed during password bank unlock. Try again.')
+          this.saveRegistry(setting, JSON.stringify(this.seal(registry, key)), stored)
+          this.registrySetting = setting
+          this.key = key; this.registry = registry; this.session = device.session; this.deadline = this.now() + SESSION_MS
+          return this.view()
+        } catch (e) { key.fill(0); throw e }
+      }
+      return this.deps.withDeviceUnlock ? this.deps.withDeviceUnlock(unlock) : unlock()
     })
   }
   async generate(count: number, ttlMinutes: number) {
@@ -216,7 +306,7 @@ export class PasswordBank {
       for (let i = 0; i < count; i++) {
         // Reserve and persist before device I/O. A cancelled slot is burned.
         const next = this.copy(), slot = next.nextSlot++
-        this.commit(next)
+        this.commit(next.version === 1 ? { ...next, version: 2, symbolFromSlot: slot } : next)
         const bytes = await this.derive(r.bankId, slot)
         try {
           const ready = this.copy(); ready.ready.push(slot); this.commit(ready)
@@ -227,12 +317,17 @@ export class PasswordBank {
     })
   }
   private ttl(minutes: number) {
-    if (!Number.isInteger(minutes) || minutes < 1 || minutes * 60000 > MAX_CACHE_MS) throw new Error('Cache duration must be 1–1440 minutes')
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > PASSWORD_CACHE_MAX_MINUTES) {
+      throw new Error(`Cache duration must be 1–${PASSWORD_CACHE_MAX_MINUTES} minutes: the unlock session lasts ${PASSWORD_CACHE_MAX_MINUTES} minutes and a cached password ends with it`)
+    }
   }
   private put(slot: number, entropy: Buffer, ttlMinutes: number) {
-    this.active()
+    const registry = this.active()
+    const bytes = usesSymbolFormat(registry, slot)
+      ? formatSymbolPassword(entropy)
+      : Buffer.from(entropy.toString('base64url').slice(0, PASSWORD_LENGTH))
     this.cache.get(slot)?.bytes.fill(0)
-    this.cache.set(slot, { bytes: Buffer.from(entropy.toString('base64url').slice(0, 24)), expiresAt: Math.min(this.deadline, this.now() + ttlMinutes * 60000) })
+    this.cache.set(slot, { bytes, expiresAt: Math.min(this.deadline, this.now() + ttlMinutes * 60000) })
   }
   assign(origin: string, account: string, reviewDays: number) {
     const r = this.copy()
@@ -258,58 +353,40 @@ export class PasswordBank {
   }
   reveal(id: string, pending = false) {
     const r = this.active(), p = this.profile(r, id), slot = pending ? p.pendingSlot : p.slot
+    if (pending && p.rotationState !== 'submitted') {
+      throw new Error('Begin the website change before accessing the new password')
+    }
     const c = slot === undefined ? undefined : this.cache.get(slot)
     if (!c) throw new Error('Password cache expired. Rehydrate this entry with KeepKey.')
     return { password: c.bytes.toString('utf8'), expiresAt: Math.min(c.expiresAt, this.now() + 30000) }
   }
   rotate(id: string, action: 'prepare' | 'submitted' | 'verify' | 'cancel', confirmed: boolean) {
     const r = this.copy(), p = this.profile(r, id)
+    let retiredSlot: number | undefined
     if (action === 'prepare') {
       if (p.pendingSlot !== undefined) throw new Error('Resolve the current rotation first')
-      const slot = r.ready.shift()
-      if (slot === undefined) throw new Error('Generate a ready password first')
+      const readyIndex = r.ready.findIndex(slot => usesSymbolFormat(r, slot))
+      if (readyIndex < 0) throw new Error('Generate a new ready password first')
+      const [slot] = r.ready.splice(readyIndex, 1)
       p.pendingSlot = slot; p.rotationState = 'prepared'
     } else if (action === 'submitted') {
       if (p.rotationState !== 'prepared') throw new Error('Prepare a new password first')
-      if (r.backedUpRevision !== r.revision) throw new Error('Export the latest recovery backup before changing the website password')
       p.rotationState = 'submitted'
     } else if (action === 'verify') {
       if (p.rotationState !== 'submitted' || !confirmed || p.pendingSlot === undefined) throw new Error('Confirm a successful sign-in with the new password first')
-      this.cache.get(p.slot)?.bytes.fill(0); this.cache.delete(p.slot)
-      for (const finding of p.riskFindings || []) if (!finding.resolvedAt && (finding.slot === p.slot || finding.slot === null)) finding.resolvedAt = this.now()
+      retiredSlot = p.slot
       p.slot = p.pendingSlot; delete p.pendingSlot; p.rotationState = 'active'; p.changedAt = this.now()
     } else if (action === 'cancel') {
       if (p.rotationState !== 'prepared' || p.pendingSlot === undefined) throw new Error('A submitted change must be reconciled; it cannot be discarded')
-      this.cache.get(p.pendingSlot)?.bytes.fill(0); this.cache.delete(p.pendingSlot)
+      retiredSlot = p.pendingSlot
       delete p.pendingSlot; p.rotationState = 'active'
     } else throw new Error('Invalid rotation action')
+    // Keep both locations available until the updated journal has committed.
     this.commit(r)
-    return this.view()
-  }
-  reportRisk(id: string, kind: PasswordRiskKind, source: 'user' | 'chrome-password-checkup') {
-    if (!['compromised', 'reused', 'weak'].includes(kind) || !['user', 'chrome-password-checkup'].includes(source)) throw new Error('Invalid risk finding')
-    const r = this.copy(), p = this.profile(r, id)
-    const slot = p.changedAt ? p.slot : null
-    const findings = p.riskFindings || []
-    if (!findings.some(f => f.kind === kind && f.source === source && f.slot === slot && !f.resolvedAt)) findings.push({ kind, source, slot, mode: 'user-reported', observedAt: this.now() })
-    if (findings.length > 100) throw new Error('Risk history is full')
-    p.riskFindings = findings
-    this.commit(r)
-    return this.view()
-  }
-  exportBackup() {
-    const next = this.copy()
-    next.backedUpRevision = next.revision
-    const json = JSON.stringify(this.seal(next), null, 2)
-    // Generating a backup is not proof it was saved. Acknowledge after writing.
-    return { json, revision: next.revision }
-  }
-  acknowledgeBackup(revision: number) {
-    const next = this.copy()
-    if (revision !== next.revision) throw new Error('The bank changed. Export the latest backup again.')
-    next.backedUpRevision = revision
-    this.saveRegistry(JSON.stringify(this.seal(next)))
-    this.registry = next
+    if (retiredSlot !== undefined) {
+      this.cache.get(retiredSlot)?.bytes.fill(0)
+      this.cache.delete(retiredSlot)
+    }
     return this.view()
   }
 }

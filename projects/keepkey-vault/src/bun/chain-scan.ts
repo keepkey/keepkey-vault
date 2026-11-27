@@ -10,6 +10,7 @@
  */
 import { evmAddressPath, type ChainDef } from '../shared/chains'
 import { versionCompare } from '../shared/firmware-versions'
+import { hardenedAccount } from '../shared/bip32-account'
 import type { AuditToken } from '../shared/types'
 
 // Families with no single-receive-address scheme custom-path derivation can walk:
@@ -52,7 +53,7 @@ export function chainLevelPath(chain: ChainDef, level: number): number[] {
   if (chain.chainFamily === 'evm') return evmAddressPath(level)
   const path = [...chain.defaultPath]
   // [2] is the BIP44 account index across every non-EVM family (verified in chains.ts).
-  if (path.length > 2) path[2] = 0x80000000 + level
+  if (path.length > 2) path[2] = hardenedAccount(level)
   return path
 }
 
@@ -95,9 +96,11 @@ export function utxoAccountScriptPaths(
       ...(chain.id === 'bitcoin' && includeBitcoinTaproot ? [{ scriptType: 'p2tr', purpose: 86 }] : []),
     ]
     : [{ scriptType: chain.scriptType || 'p2pkh', purpose: 44 }]
+  // Throws for an index that would overflow the hardened element and wrap to another account (audit v6 H8).
+  const accountElement = hardenedAccount(account)
   const out = scriptTypes.map(st => ({
     scriptType: st.scriptType,
-    path: [st.purpose + 0x80000000, chain.defaultPath[1], 0x80000000 + account],
+    path: [st.purpose + 0x80000000, chain.defaultPath[1], accountElement],
   }))
   // The chain's own receive convention (defaultPath purpose + chain.scriptType)
   // must always be queried: blockbook derives the script type from the xpub's
@@ -107,7 +110,7 @@ export function utxoAccountScriptPaths(
   const ownScript = chain.scriptType || 'p2pkh'
   const ownPurpose = chain.defaultPath[0]
   if (!out.some(e => e.scriptType === ownScript && e.path[0] === ownPurpose)) {
-    out.push({ scriptType: ownScript, path: [ownPurpose, chain.defaultPath[1], 0x80000000 + account] })
+    out.push({ scriptType: ownScript, path: [ownPurpose, chain.defaultPath[1], accountElement] })
   }
   // Litecoin historical convention: pre-1.4.10 releases handed out p2wpkh
   // addresses on the 44' branch. Keep that branch queried as p2wpkh so those
@@ -115,10 +118,10 @@ export function utxoAccountScriptPaths(
   // pubkey-cache upsert keeps this entry over p2pkh on the shared 44' path
   // (vault-generated addresses are far more likely to hold funds there).
   if (chain.id === 'litecoin') {
-    out.push({ scriptType: 'p2wpkh', path: [0x8000002C, chain.defaultPath[1], 0x80000000 + account] })
+    out.push({ scriptType: 'p2wpkh', path: [0x8000002C, chain.defaultPath[1], accountElement] })
   }
   if (chain.id === 'digibyte' && includeDgbTaproot) {
-    out.push({ scriptType: 'p2tr', path: [0x80000000 + 86, chain.defaultPath[1], 0x80000000 + account] })
+    out.push({ scriptType: 'p2tr', path: [0x80000000 + 86, chain.defaultPath[1], accountElement] })
   }
   return out
 }

@@ -25,7 +25,8 @@ test('a MAYAChain send from history shows the 0.2 CACAO native fee, not 0', () =
 })
 
 test('receives pay no fee, other chains and real fees are untouched', () => {
-  expect(normalizeMeta({ direction: 'received', value: '1', fee: '0' }, 'receive', chain('thorchain')).fee).toBe('0')
+  // Audit v6 R5: the sender pays, so a receive carries no fee of ours at all.
+  expect(normalizeMeta({ direction: 'received', value: '1', fee: '0' }, 'receive', chain('thorchain')).fee).toBeUndefined()
   expect(normalizeMeta({ direction: 'sent', value: '1', fee: '5000' }, 'send', chain('cosmos')).fee).toBe('5000')
   expect(normalizeMeta({ direction: 'sent', value: '1', fee: '3000000' }, 'send', chain('thorchain')).fee).toBe('3000000')
 })
@@ -53,7 +54,7 @@ test('a stored THORChain send row with fee 0 reads the 0.02 RUNE native fee', as
     const rows = db.getRecentActivityFromLog(undefined, undefined, wallet.deviceId, wallet.walletId)
     const fee = (txid: string) => rows.find(r => r.txid === txid)?.fee
     expect(fee('THOR-OLD-SEND')).toBe('2000000')
-    expect(fee('THOR-OLD-RECEIVE')).toBe('0')
+    expect(fee('THOR-OLD-RECEIVE')).toBeUndefined() // audit v6 R5: no fee on a receive
     expect(fee('ATOM-SEND')).toBe('5000')
     expect(fee('MAYA-NO-CHAINID')).toBe('2000000000')
   } finally {

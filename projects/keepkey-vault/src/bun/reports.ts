@@ -19,9 +19,12 @@ import { utxoDiscoveryKey } from './btc-backend/types'
 import { getBtcBackend } from './btc-backend'
 import { createReportFonts, reportText as sanitize } from './report-fonts'
 import { embedBitcoinComLogo } from './report-branding'
-import { buildFlowTx, withRunningBalance, flowTotals, describeOwnPath, type BtcFlowTx } from './report-btc-flow'
+import { buildFlowTx, withRunningBalance, flowTotals, describeOwnPath, buildAddressFlow, type BtcFlowTx } from './report-btc-flow'
+import { csvCell } from './csv'
 
 const BTC_NETWORK_ID = CHAINS.find(c => c.id === 'bitcoin')!.networkId
+
+export const UNKNOWN_BTC_FEE = 'Unknown'
 
 /** Section title prefixes — shared with tax-export.ts for reliable extraction. */
 export const SECTION_TITLES = {
@@ -410,13 +413,15 @@ async function buildBtcSections(
 	const btc = (sats: number) => (sats / 1e8).toFixed(8)
 	const signed = (sats: number) => `${sats > 0 ? '+' : sats < 0 ? '-' : ''}${btc(Math.abs(sats))}`
 	const date = (ts: number) => ts ? new Date(ts * 1000).toISOString().replace('T', ' ').substring(0, 19) : 'Pending'
-	const count = (dir: string) => sorted.filter(f => f.dir === dir).length
+	const sharedCount = sorted.filter(f => f.shared).length
+	const count = (dir: string) => sorted.filter(f => !f.shared && f.dir === dir).length
 	const matches = missing.length === 0 && t.computedBalance === totalBalSats
 	const partial = missing.length ? ' (incomplete)' : ''
 	headline.push(
 		`BTC In from others${partial}: ${btc(t.received)} BTC`,
 		`BTC Out to others${partial}: ${btc(t.sent)} BTC`,
 		`BTC Fees Paid${partial}: ${btc(t.fees)} BTC`,
+		...(sharedCount ? [`BTC Net Change in Shared Transactions${partial}: ${signed(t.sharedNet)} BTC`] : []),
 		`BTC Balance: ${btc(totalBalSats)} BTC`,
 	)
 
@@ -426,7 +431,8 @@ async function buildBtcSections(
 		data: 'Amounts are what moved into or out of THIS wallet. One Bitcoin transaction often has several outputs. ' +
 			'When someone pays you, their wallet usually sends its own leftover (change) back to itself in the same transaction. ' +
 			'Those outputs are marked NOT YOURS below and are never counted as yours. When you send, your leftover comes back to one ' +
-			'of your own change addresses (marked YOURS - change). The running balance column shows what the wallet held after each transaction.',
+			'of your own change addresses (marked YOURS - change). The running balance column shows what the wallet held after each transaction.' +
+			(sharedCount ? ' For shared transactions, the amount is the wallet’s net change including any fee. Payment, fee and counterparty attribution are unavailable.' : ''),
 	})
 
 	sections.push({
@@ -436,8 +442,9 @@ async function buildBtcSections(
 			`Received from others: ${btc(t.received)} BTC (${count('received')} transactions)`,
 			`Sent to others (including swaps): ${btc(t.sent)} BTC (${count('sent')} transactions)`,
 			`Network fees you paid: ${btc(t.fees)} BTC`,
+			...(sharedCount ? [`Net change from shared transactions: ${signed(t.sharedNet)} BTC (${sharedCount} transactions)`] : []),
 			`Moves between your own addresses: ${t.internal}`,
-			`Balance from history (received - sent - fees): ${btc(t.computedBalance)} BTC`,
+			`Balance from history (received - sent - fees${sharedCount ? " + shared net" : ""}): ${btc(t.computedBalance)} BTC`,
 			`Balance reported by the blockchain indexer: ${btc(totalBalSats)} BTC - ${matches ? 'MATCHES' : `DOES NOT MATCH${missing.length ? ` (${missing.length} transactions could not be loaded)` : ''}`}`,
 			`Highest balance ever held: ${btc(t.peak.sats)} BTC${t.peak.timestamp ? ` (${date(t.peak.timestamp)})` : ''}`,
 			`Transaction detail sources: ${[...detailSources].map(([source, count]) => `${source} (${count})`).join(', ')}`,
@@ -453,7 +460,7 @@ async function buildBtcSections(
 			widths: ['4%', '7%', '17%', '6%', '12%', '10%', '9%', '10%', '25%'],
 			rows: sorted.map((f, i) => [
 				(i + 1).toString(), f.dir.toUpperCase(), f.txid, f.blockHeight.toString(), date(f.timestamp),
-				btc(f.amount), f.dir === 'received' ? '-' : btc(f.fee), btc(f.balanceAfter), f.label,
+				f.shared ? signed(f.net) : btc(f.amount), f.fee === null ? UNKNOWN_BTC_FEE : f.dir === 'received' ? '-' : btc(f.fee), btc(f.balanceAfter), f.label,
 			]),
 		},
 	})
@@ -467,7 +474,7 @@ async function buildBtcSections(
 			widths: ['14%', '6%', '6%', '11%', '9%', '8%', '15%', '15%', '16%'],
 			rows: sorted.map(f => [
 				f.txid, f.dir.toUpperCase(), f.blockHeight.toString(), date(f.timestamp),
-				btc(f.amount), f.dir === 'received' ? '-' : btc(f.fee), list(f.from), list(f.to), f.label,
+				f.shared ? signed(f.net) : btc(f.amount), f.fee === null ? UNKNOWN_BTC_FEE : f.dir === 'received' ? '-' : btc(f.fee), list(f.from), list(f.to), f.label,
 			]),
 		},
 	})
@@ -504,44 +511,6 @@ async function buildBtcSections(
 	onProgress?.('Computing address flow...', 70)
 	sections.push(...buildAddressFlow(sorted))
 
-	return sections
-}
-
-// ── Address Flow Analysis ────────────────────────────────────────────
-
-function buildAddressFlow(flows: BtcFlowTx[]): ReportSection[] {
-	const sentTo = new Map<string, { amount: number; count: number }>()
-	const recvFrom = new Map<string, { amount: number; count: number }>()
-	const add = (m: typeof sentTo, k: string, sats: number) => {
-		const e = m.get(k) || { amount: 0, count: 0 }
-		e.amount += sats; e.count++; m.set(k, e)
-	}
-	for (const f of flows) {
-		if (f.dir === 'sent') for (const r of f.rows) if (r.side === 'OUT' && r.whose.startsWith('Paid to')) add(sentTo, r.address, r.sats)
-		if (f.dir === 'received') add(recvFrom, [...new Set(f.from)].join(', ') || '(unknown)', f.amount)
-	}
-	const rank = (m: typeof sentTo) => [...m].sort((a, b) => b[1].amount - a[1].amount)
-	const sum = (m: typeof sentTo) => [...m.values()].reduce((s, e) => s + e.amount, 0)
-	const table = (title: string, m: typeof sentTo): ReportSection => ({
-		title: `${title} (${m.size})`,
-		type: 'table',
-		data: {
-			headers: ['#', 'Address', 'Amount (BTC)', 'TX Count'],
-			widths: ['6%', '54%', '25%', '15%'],
-			rows: rank(m).slice(0, 100).map(([a, e], i) => [(i + 1).toString(), a, (e.amount / 1e8).toFixed(8), e.count.toString()]),
-		},
-	})
-
-	const sections: ReportSection[] = [{
-		title: '7. Address Flow Analysis',
-		type: 'summary',
-		data: [
-			`BTC Sent to: ${(sum(sentTo) / 1e8).toFixed(8)} BTC (${sentTo.size} unique addresses)`,
-			`BTC Received from: ${(sum(recvFrom) / 1e8).toFixed(8)} BTC (${recvFrom.size} unique senders)`,
-		],
-	}]
-	if (sentTo.size) sections.push(table('Sent To', sentTo))
-	if (recvFrom.size) sections.push(table('Received From', recvFrom))
 	return sections
 }
 
@@ -676,15 +645,6 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 }
 
 // ── CSV Export ────────────────────────────────────────────────────────
-
-/** Escape a cell value for CSV: quote wrapping + formula injection prevention */
-function csvCell(value: any): string {
-	let s = String(value ?? '').replace(/"/g, '""')
-	// Prevent formula injection: trim leading whitespace then prefix dangerous chars
-	const trimmed = s.trimStart()
-	if (/^[=+\-@\t\r\n]/.test(trimmed)) s = `'${s}`
-	return `"${s}"`
-}
 
 export function reportToCsv(data: ReportData): string {
 	const lines: string[] = []

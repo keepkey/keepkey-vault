@@ -1,4 +1,3 @@
-import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
 import { addressBookLabel } from "../lib/addressbook-label"
 import { useState, useMemo, useCallback, useEffect } from "react"
@@ -21,6 +20,7 @@ import { Z } from "../lib/z-index"
 import { evmChainLabel } from "../../shared/chains"
 import type { AddressBookEntry, AddressBookTx, AddressBookCertificationPreview, AppSettings } from "../../shared/types"
 import { VaultIdentityBadge, VaultIdentityDetails } from './VaultIdentityBadge'
+import { getDateLocale } from '../lib/date-locale'
 
 const chainById = new Map(CHAINS.map(c => [c.id, c]))
 const chainByNetwork = chainsByNetwork(CHAINS)
@@ -428,7 +428,7 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
           {isVault && <Text fontSize="10px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all">{uiText("Vault ·")}{" "}{entry.networkId} · {entry.vault!.threshold}{" "}{uiText("of")}{" "}{entry.vault!.cosigners.length}{" "}{uiText("cosigners")}{!entry.vault!.receiveEnabled ? ` · ${entry.vault!.fundingBlockedReason || 'Not deployed'} · do not fund` : ''}</Text>}
           {!isOwn && entry.savedAt && (
             <Text fontSize="10px" color="var(--text-3)">
-              {t("addedOn", { defaultValue: "Added {{date}}", date: new Date(entry.savedAt).toLocaleDateString(getNumberLocale()) })}
+              {t("addedOn", { defaultValue: "Added {{date}}", date: new Date(entry.savedAt).toLocaleDateString(getDateLocale()) })}
             </Text>
           )}
         </Flex>
@@ -487,7 +487,7 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
                 const url = txChain ? getExplorerTxUrl(txChain.id, tx.txid) : null
                 return (
                   <Flex key={tx.id} align="center" justify="space-between" gap="2" fontSize="11px">
-                    <Text color="var(--text-2)" fontFamily="mono">{new Date(tx.broadcastAt).toLocaleDateString(getNumberLocale())}</Text>
+                    <Text color="var(--text-2)" fontFamily="mono">{new Date(tx.broadcastAt).toLocaleDateString(getDateLocale())}</Text>
                     <Text color="var(--text-1)" fontFamily="mono" truncate flex="1" textAlign="right">
                       {tx.amount ? `${tx.amount} ${tx.symbol || ""}` : (tx.symbol || "")}
                     </Text>

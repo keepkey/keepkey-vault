@@ -1,6 +1,7 @@
 import { Chain, ChainToNetworkId, ChainToCaip, BaseDecimal } from '@pioneer-platform/pioneer-caip'
 import type { BtcScriptType, CustomChain } from './types'
 import { versionCompare } from './firmware-versions'
+import { hardenedAccount } from './bip32-account'
 
 export interface ChainDef {
   id: string
@@ -73,7 +74,7 @@ export function btcScriptTypeConfig(scriptType: BtcScriptType): BtcScriptTypeCon
 
 /** Build a BIP44/49/84/86 account-level path: m/purpose'/0'/accountIndex' */
 export function btcAccountPath(purpose: number, accountIndex: number): number[] {
-  return [purpose + 0x80000000, 0x80000000, accountIndex + 0x80000000]
+  return [purpose + 0x80000000, 0x80000000, hardenedAccount(accountIndex)]
 }
 
 /**
@@ -93,7 +94,12 @@ export function btcAccountPath(purpose: number, accountIndex: number): number[] 
  * tests can import it without dragging in ./db / electrobun side effects.
  */
 export function evmAddressPath(index: number): number[] {
-  return [0x8000002C, 0x8000003C, 0x80000000 + index, 0, 0]
+  return [0x8000002C, 0x8000003C, hardenedAccount(index, 'EVM address index'), 0, 0]
+}
+
+/** Zcash transparent receive path m/44'/133'/account'/0/0. */
+export function zcashTransparentReceivePath(account: number): number[] {
+  return [0x8000002C, 0x80000085, hardenedAccount(account), 0, 0]
 }
 
 // Hive uses SLIP-0048, not BIP-44: m/48'/13'/role'/account'/0' (all 5 hardened).
@@ -101,7 +107,7 @@ export function evmAddressPath(index: number): number[] {
 // keys are non-interoperable and unrecoverable in other tools.
 const HIVE_ROLES = { owner: 0, active: 1, memo: 3, posting: 4 } as const
 export function hiveRolePath(role: keyof typeof HIVE_ROLES, accountIndex = 0): number[] {
-  return [0x80000030, 0x8000000D, 0x80000000 + HIVE_ROLES[role], 0x80000000 + accountIndex, 0x80000000]
+  return [0x80000030, 0x8000000D, 0x80000000 + HIVE_ROLES[role], hardenedAccount(accountIndex), 0x80000000]
 }
 
 // Minimal per-chain config — everything else derived from pioneer-caip

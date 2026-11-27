@@ -1,4 +1,5 @@
 import type { BtcAddressIndices, BtcBackendKind } from './types'
+import { isAccountIndex } from '../../shared/bip32-account'
 
 /** Parse Blockbook/Pioneer address tokens into the first indexes after the
  * highest used receive and change addresses. Malformed paths never advance an
@@ -16,7 +17,8 @@ export function addressIndicesFromTokens(tokens: unknown, source: BtcBackendKind
       const match = /(?:^|\/)([01])\/(\d+)$/.exec(path)
       if (!match) continue
       const index = Number(match[2])
-      if (!Number.isSafeInteger(index) || index < 0) continue
+      // An index from 2^31 up is not a real unhardened address (audit v6 H8).
+      if (!isAccountIndex(index)) continue
       if (match[1] === '0') maxReceive = Math.max(maxReceive, index)
       else maxChange = Math.max(maxChange, index)
     }

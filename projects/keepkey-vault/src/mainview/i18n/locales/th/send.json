@@ -80,5 +80,22 @@
 	"recipientContractNote": "ที่อยู่นี้เป็นสมาร์ทคอนแทรกต์ ตรวจสอบให้แน่ใจว่ารับ {{symbol}} ได้ เงินที่ส่งไปยังสัญญาที่จัดการไม่ได้อาจสูญหาย",
 	"customGasPriceTooHigh": "ราคาแก๊สสูงกว่าราคาของเครือข่าย ({{gwei}} gwei) ตั้งแต่ 10 เท่าขึ้นไป ลดราคาลงหรือใช้ค่าที่ตั้งไว้",
 	"customGasPriceTooLow": "ราคาแก๊สต่ำกว่าค่าธรรมเนียมพื้นฐานของเครือข่าย (~{{gwei}} gwei) ธุรกรรมจะไม่ได้รับการยืนยัน",
-	"gasPriceUnavailable": "โหลดราคาแก๊สของเครือข่ายไม่ได้ Desktop จึงจะไม่เดาค่าธรรมเนียม ลองอีกครั้งในอีกสักครู่"
+	"amountBelowDust": "จำนวนเงินต่ำกว่าขั้นต่ำที่เครือข่ายยอมรับ ส่งอย่างน้อย {{minimum}} {{symbol}}",
+	"maxBelowDust": "หลังหักค่าธรรมเนียม จำนวนที่จะส่งต่ำกว่าขั้นต่ำที่เครือข่ายยอมรับ ({{minimum}} {{symbol}}) เพิ่มยอดเงินหรือลดค่าธรรมเนียม",
+	"gasPriceUnavailable": "โหลดราคาแก๊สของเครือข่ายไม่ได้ Desktop จึงจะไม่เดาค่าธรรมเนียม ลองอีกครั้งในอีกสักครู่",
+	"insufficientAmountAndFee": "{{symbol}} ไม่พอสำหรับจำนวนเงินและค่าธรรมเนียมเครือข่าย",
+	"insufficientAfterFees": "หลังหักค่าธรรมเนียมเครือข่ายแล้วไม่เหลือจำนวนให้ส่ง",
+	"insufficientToken": "ยอดโทเค็นไม่พอสำหรับจำนวนนี้",
+	"insufficientTokenAmount": "ยอดคงเหลือไม่พอ: ใช้ได้ {{available}} ขอ {{requested}}",
+	"insufficientGas": "{{symbol}} ไม่พอสำหรับค่าธรรมเนียมเครือข่าย: คุณมี {{have}} {{symbol}} และต้องใช้ประมาณ {{need}} {{symbol}}",
+	"insufficientGasForMax": "ยอดคงเหลือไม่พอจ่ายค่าธรรมเนียมเครือข่าย",
+	"insufficientAmountAndGas": "{{symbol}} ไม่พอ: คุณมี {{have}} {{symbol}} และต้องใช้ {{need}} {{symbol}} รวมค่าธรรมเนียมเครือข่าย",
+	"insufficientAmount": "{{symbol}} ไม่พอ: คุณมี {{have}} {{symbol}} และต้องใช้ {{need}} {{symbol}}",
+	"insufficientAmountAndFeeNoSymbol": "ยอดคงเหลือไม่พอสำหรับจำนวนเงินรวมค่าธรรมเนียมเครือข่าย ส่งจำนวนที่น้อยลงหรือลดค่าธรรมเนียม",
+	"insufficientDogeMinimumFee": "DOGE ไม่พอสำหรับค่าธรรมเนียมเครือข่ายขั้นต่ำ 1 DOGE",
+	"insufficientZcashMinimumFee": "ZEC ไม่พอสำหรับค่าธรรมเนียมเครือข่ายขั้นต่ำ {{fee}} ZEC",
+	"insufficientZcashMinimumFeeExact": "ZEC ไม่พอสำหรับค่าธรรมเนียมเครือข่ายขั้นต่ำ {{fee}} ZEC ลองส่งจำนวนที่น้อยลงเล็กน้อย",
+	"insufficientXrpReserve": "XRP ไม่พอหลังหักเงินสำรองบัญชีและค่าธรรมเนียมเครือข่าย",
+	"insufficientTronMaxReserve": "TRX ไม่พอที่จะส่งจำนวนสูงสุดหลังกันไว้ {{reserve}} TRX สำหรับค่าธรรมเนียมเครือข่าย",
+	"exceedsBalanceWithFee": "จำนวนเงินรวมค่าธรรมเนียมเครือข่าย ({{fee}} {{symbol}}) เกินยอดคงเหลือที่ใช้ได้ ({{balance}} {{symbol}})"
 }
