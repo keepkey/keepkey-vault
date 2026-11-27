@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const settings = {
-  passwordManagerEnabled: false, moneroEnabled: false, moneroAvailable: false,
+  passwordManagerEnabled: false, moneroEnabled: false,
   zcashPrivacyEnabled: false, btcMultisigEnabled: false, walletConnectEnabled: false,
   emulatorEnabled: false, hiveEnabled: false, offlineMode: false, restApiEnabled: false,
   alphaFirmware: false, preReleaseUpdates: false, appLanguage: 'en',

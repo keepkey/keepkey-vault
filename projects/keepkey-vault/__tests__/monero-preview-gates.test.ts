@@ -110,15 +110,12 @@ describe('Monero preview gates', () => {
 		expect(fixture.settings().moneroPendingBroadcasts).toBe(3)
 		expect(fixture.counts()).toEqual({ walletReads: 1, constructions: 0 })
 	})
-	for (const readiness of [{ worker: false }, { tools: false }, { verifier: false }, { tools: false, verifier: false }]) {
-		test(`actual settings require the full Monero toolchain (${JSON.stringify(readiness)})`, () => {
-			const fixture = moneroSettingsFixture(true, false, readiness)
-			expect(fixture.settings()).toMatchObject({ moneroAvailable: false, moneroEnabled: true, moneroPendingBroadcasts: 3 })
-			expect(fixture.counts()).toEqual({ walletReads: 1, constructions: 0 })
-		})
-	}
-	test('actual settings offer Monero only when the complete signing toolchain is usable', () => {
-		expect(moneroSettingsFixture(false, false).settings().moneroAvailable).toBe(true)
+	test('Monero is gated by the feature flag and firmware only, never by platform or bundled tools', () => {
+		for (const readiness of [{}, { worker: false }, { tools: false }, { verifier: false }]) {
+			const settings = moneroSettingsFixture(true, false, readiness).settings()
+			expect(settings.moneroEnabled).toBe(true)
+			expect('moneroAvailable' in settings).toBe(false)
+		}
 	})
 	test('monero-signing capability only', () => {
 		expect(supportsMoneroSigning([31])).toBe(true)
