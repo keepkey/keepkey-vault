@@ -54,9 +54,15 @@ export async function verifiedHostAdapter(walletRpc: string): Promise<string | n
   return verifiedHostAdapterIn(dirname(walletRpc))
 }
 
+/** No inherited variables reach the decoder. Windows is the one exception: without SystemRoot,
+ * Winsock and CRT start-up in a process can fail, so pass that path and nothing else. */
+export function hostAdapterEnvironment(platform: string = process.platform, systemRoot = process.env.SystemRoot): Record<string, string> {
+  return platform === 'win32' && systemRoot && /^[A-Za-z]:\\[^"<>|?*]{0,200}$/.test(systemRoot) ? { SystemRoot: systemRoot } : {}
+}
+
 /** One JSON request on stdin, one bounded JSON reply on stdout. Credentials never reach argv; stderr is discarded. */
 export async function runHostAdapter(binary: string, request: Record<string, string>): Promise<any> {
-  const child = Bun.spawn([binary], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore', env: {} })
+  const child = Bun.spawn([binary], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore', env: hostAdapterEnvironment() })
   const timeout = setTimeout(() => child.kill('SIGKILL'), 60000)
   try {
     child.stdin.write(JSON.stringify(request)); await child.stdin.end()

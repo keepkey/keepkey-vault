@@ -8,7 +8,7 @@
     "path": "projects/keepkey-vault/native/monero-host-adapter/host-adapter.cpp",
     "sha256": "86e82c7d3fa215eb472c886e97e0e89fc2116801ea4c34fdc58512e6803592f3",
     "buildScriptPath": "scripts/build-monero-host-adapter.py",
-    "buildScriptSha256": "a36ff71b97daa5ea46970689b9cdaffe3246fd9904bef27a475c0fb7f27e0a8b",
+    "buildScriptSha256": "53f728f17733971101c9cf642c20c844dbf5e3181036b6c29a36d3c7bf9b438f",
     "coreCommit": "85f036ba7019cd36f08e8a38a27c37ea7b522618",
     "archivesSha256": {
       "monero-core-v0.18.5.4.tar.gz": "a9514399f085a05101c84bf905bc17eae96db2215922f8023b492795259c215f",
@@ -27,6 +27,12 @@
       "validationReportSha256": "9ec6828c514e002c19a0a4c3227d65a94ec451c4f5e705fd341ad7586f795545"
     },
     "archiveSources": {
+      "monero-core-v0.18.5.4.tar.gz": "https://github.com/monero-project/monero/archive/refs/tags/v0.18.5.4.tar.gz",
+      "monero-randomx.tar.gz": "https://github.com/tevador/RandomX/archive/12f2c2ffe2108d6cf54c391fee33c8bc3646cdab.tar.gz",
+      "monero-rapidjson.tar.gz": "https://github.com/Tencent/rapidjson/archive/129d19ba7f496df5e33658527a7158c79b99c21c.tar.gz",
+      "monero-supercop.tar.gz": "https://github.com/monero-project/supercop/archive/633500ad8c8759995049ccd022107d1fa8a1bbc9.tar.gz",
+      "boost-1.90.0.tar.xz": "https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-b2-nodocs.tar.xz",
+      "libsodium-1.0.22.tar.gz": "https://github.com/jedisct1/libsodium/releases/download/1.0.22-RELEASE/libsodium-1.0.22.tar.gz",
       "openssl-3.5.9.tar.gz": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz"
     },
     "sourceDateEpoch": 1790640000,

@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { checkHostAdapterFile, hostAdapterArtifact, verifiedHostAdapterIn } from './host-adapter'
-import { runHostAdapter, verifiedHostAdapter } from './tools'
+import { hostAdapterEnvironment, runHostAdapter, verifiedHostAdapter } from './tools'
 import { parseExactJson, PublicError, validateOutputs, validatePlan, validateTransferDraft } from './protocol'
 import { MoneroWatchService } from './wallet'
 import { stageMoneroAdapter } from '../../scripts/stage-monero-adapter'
@@ -18,6 +18,21 @@ const metadata = (directory: string, extra = {}) => writeFileSync(join(directory
 afterEach(() => { for (const path of folders.splice(0)) rmSync(path, { recursive: true, force: true }) })
 
 describe('Monero host adapter admission', () => {
+  test('the decoder inherits no environment; Windows receives only a plain SystemRoot path', () => {
+    expect(hostAdapterEnvironment('darwin', 'C:/Windows')).toEqual({})
+    expect(hostAdapterEnvironment('linux', 'C:/Windows')).toEqual({})
+    const windows = String.raw`C:\Windows`
+    expect(hostAdapterEnvironment('win32', windows)).toEqual({ SystemRoot: windows })
+    expect(hostAdapterEnvironment('win32', '')).toEqual({})
+    expect(hostAdapterEnvironment('win32', 'relative')).toEqual({})
+    expect(hostAdapterEnvironment('win32', String.raw`C:\Windows" & calc`)).toEqual({})
+  })
+
+  test('the Windows pin names the adapter with .exe', () => {
+    const artifact = hostAdapterArtifact('win32-x64')
+    if (artifact) expect(artifact.filename).toBe('monero-host-adapter.exe')
+  })
+
   test('optional absence is explicit; required absence and a supplied wrong pin fail', () => {
     const directory = folder()
     expect(stageMoneroAdapter({ directory, platform: 'darwin-arm64', ifAvailable: true }).staged).toBe(false)
