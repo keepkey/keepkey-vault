@@ -41,7 +41,8 @@ def validate_used_boost_headers(cache, boost):
     # therefore shadow it even when FindBoost selects our pinned headers/libs.
     # Validate the headers the compiler actually used, not only CMake's cache.
     used = {}
-    for dependency in cache.rglob("*.o.d"):
+    # Clang on macOS writes <object>.o.d; MinGW objects are .obj, so CMake writes <object>.obj.d.
+    for dependency in [*cache.rglob("*.o.d"), *cache.rglob("*.obj.d")]:
         for name in shlex.split(dependency.read_text().replace("\\\n", " ")):
             if "/boost/" not in name:
                 continue
