@@ -24,6 +24,7 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "projects/keepkey-vault/monero-cli/core-verifier-manifest.json"
+ADAPTER_MANIFEST = ROOT / "projects/keepkey-vault/monero-cli/host-adapter-manifest.json"
 NATIVE = ROOT / "projects/keepkey-vault/native/monero-core-verifier"
 
 
