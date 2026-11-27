@@ -292,7 +292,12 @@ export function AddressBookView() {
                 ) : (
                   <Box w="7px" h="7px" borderRadius="full" bg={tb.connected ? "var(--teal)" : "var(--text-2)"} title={tb.connected ? t("connected", { defaultValue: "Connected" }) : t("watchOnly", { defaultValue: "Watch-only" })} />
                 )}
-                <Text truncate maxW="140px">{tb.label}</Text>
+                {/* Device names can be long, so their tabs cut at 140px and show the full name on hover.
+                    "Saved recipients" is fixed copy: never cut, it outgrows 140px in Portuguese and French
+                    (the tab row scrolls sideways). */}
+                {tb.external
+                  ? <Text>{tb.label}</Text>
+                  : <Text truncate maxW="140px" title={tb.label}>{tb.label}</Text>}
               </Flex>
             )
           })}
