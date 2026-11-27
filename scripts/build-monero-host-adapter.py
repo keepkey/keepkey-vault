@@ -99,13 +99,30 @@ def windows_link_command(cache, target_name, work):
     """CMake's final link line with response files expanded and every archive or library
     from outside this build (the MSYS2 prefix) removed, except Windows system import
     libraries. The dropped inputs are reported, so a review sees exactly what was cut."""
-    lines = [shlex.split(line) for line in (cache / "CMakeFiles" / (target_name + ".dir") / "link.txt").read_text().splitlines() if line.strip()]
-    lines = [line for line in lines if "-o" in line]
+    link = cache / "CMakeFiles" / (target_name + ".dir") / "link.txt"
+    if link.is_file():
+        text = link.read_text()
+    else:
+        # On a Windows host CMake's Makefile generator writes the link command into
+        # build.make, not link.txt. Every object is already built, so a dry run prints
+        # just that command (make -n echoes recipes without running them).
+        text = subprocess.run(["cmake", "--build", Path(cache).as_posix(), "--target", target_name, "--", "-n"],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout
+        (cache / (target_name + "-link-dry-run.txt")).write_text(text)
+    lines = [shlex.split(line.split("&&")[-1]) for line in text.splitlines() if line.strip()]
+    lines = [line for line in lines if line and "-o" in line and Path(line[0]).name.lower().endswith(("++.exe", "++"))]
     if len(lines) != 1:
         raise ValueError("Expected exactly one link command for " + target_name)
+    def native(arg):
+        # msys make may print MSYS paths (/D/xmr/...); Python runs the linker directly, so use D:/xmr/...
+        for flag in ("-L", ""):
+            rest = arg[len(flag):]
+            if arg.startswith(flag) and len(rest) > 2 and rest[0] == "/" and rest[1].isalpha() and rest[2] == "/":
+                return flag + rest[1].upper() + ":" + rest[2:]
+        return arg
     expanded = []
     for arg in lines[0]:
-        expanded += shlex.split((cache / arg[1:]).read_text()) if arg.startswith("@") else [arg]
+        expanded += [native(a) for a in shlex.split((cache / arg[1:]).read_text())] if arg.startswith("@") else [native(arg)]
     command, dropped, inside = [], [], Path(work).resolve()
     for arg in expanded:
         library = None

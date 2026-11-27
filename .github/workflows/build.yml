@@ -998,6 +998,10 @@ jobs:
             D:\xmr\vf\result.json
             D:\xmr\ha\core-build\CMakeFiles\monero_host_adapter.dir\link.txt
             D:\xmr\vf\core-build\CMakeFiles\monero_core_verify.dir\link.txt
+            D:\xmr\ha\core-build\*-link-dry-run.txt
+            D:\xmr\vf\core-build\*-link-dry-run.txt
+            D:\xmr\ha\core-build\CMakeFiles\monero_host_adapter.dir\build.make
+            D:\xmr\vf\core-build\CMakeFiles\monero_core_verify.dir\build.make
           if-no-files-found: ignore
           retention-days: 7
 
