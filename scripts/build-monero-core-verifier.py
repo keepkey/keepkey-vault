@@ -47,6 +47,21 @@ WINDOWS_SYSTEM_DLLS = {"kernel32.dll", "advapi32.dll", "user32.dll", "ws2_32.dll
 WINDOWS_LINK_LIBRARIES = {name[:-4] for name in WINDOWS_SYSTEM_DLLS} | {
     "uuid", "ntdll", "psapi", "userenv", "pthread", "m", "stdc++", "gcc", "gcc_eh", "mingwex", "mingw32", "moldname"}
 WINDOWS_TOOLCHAIN_PACKAGES = ("mingw-w64-ucrt-x86_64-", "make ", "perl ")
+# Core's DNS code is unreachable from the verifier: macOS ld64 dead-strips it, so the
+# reviewed darwin dylib links no unbound. GNU ld on PE may keep those references. Rather
+# than link MSYS2's unpinned libunbound, they resolve to stubs that abort, so reaching
+# them fails closed. They sit in an archive, so a link only pulls the ones it references.
+UNBOUND_UNREACHABLE = ["ub_ctx_add_ta", "ub_ctx_async", "ub_ctx_create", "ub_ctx_delete", "ub_ctx_hosts",
+                       "ub_ctx_resolvconf", "ub_ctx_set_fwd", "ub_ctx_set_option", "ub_ctx_zone_add",
+                       "ub_resolve", "ub_resolve_free", "ub_strerror"]
+
+
+def windows_unreachable_archive(work, run, flags):
+    source, obj, archive = work / "unbound-unreachable.c", work / "unbound-unreachable.o", work / "libunbound-unreachable.a"
+    source.write_text("#include <stdlib.h>\n" + "".join("void " + name + "(void) { abort(); }\n" for name in UNBOUND_UNREACHABLE))
+    run(["gcc", "-c", "-O2"] + flags + [source.as_posix(), "-o", obj.as_posix()], "unbound-unreachable.log")
+    run(["ar", "rcsD", archive.as_posix(), obj.as_posix()], "unbound-unreachable-ar.log")
+    return archive
 
 
 def windows_import_allowed(dll):
@@ -177,7 +192,7 @@ def build_windows(work, output, jobs, run, artifact, core, boost, sodium, openss
         raise RuntimeError("Core build did not produce " + ", ".join(missing[:5]) + "; inspect " + str(work / "core-build.log"))
     command[command.index("-o") + 1] = posix(output)
     command += [posix(stage / name) for name in ["libboost_thread.a", "libboost_chrono.a", "libboost_atomic.a", "libboost_date_time.a"]]
-    command += [posix(sodium_object), posix(exports)]
+    command += [posix(sodium_object), posix(exports), posix(windows_unreachable_archive(work, run, sections + [prefix]))]
     run(command, "final-link.log", cache)
     pe = windows_pe_report(output)
     disallowed = [dll for dll in pe["imports"] if not windows_import_allowed(dll)]
@@ -187,6 +202,7 @@ def build_windows(work, output, jobs, run, artifact, core, boost, sodium, openss
                          "; exports " + ", ".join(pe["exports"]))
     return {"status": "pass", "target": "win32-x64", "path": str(output), "sha256": digest(output), "size": output.stat().st_size,
             "architecture": "x86_64", "dependencies": pe["imports"], "exports": pe["exports"], "droppedLinkInputs": dropped,
+            "abortingStubsAvailable": UNBOUND_UNREACHABLE,
             "matchesReviewedArtifact": bool(artifact) and digest(output) == artifact["sha256"], "archivesSha256": pins,
             "bridgeSha256": {p.name: digest(p) for p in NATIVE.iterdir() if p.is_file()}, **windows_toolchain()}
 
