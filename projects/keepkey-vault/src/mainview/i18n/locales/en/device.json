@@ -191,5 +191,28 @@
 		"waiting": "Waiting for device to become available...",
 		"supportLink": "Still having trouble? Submit a support ticket",
 		"defaultError": "Device claimed by another process"
+	},
+	"passkeys": {
+		"noDevice": "No KeepKey FIDO interface found. Connect the KeepKey (firmware 7.16 or newer).",
+		"noAnswer": "The KeepKey did not answer in time. Try again.",
+		"declined": "Declined on the KeepKey",
+		"cancelled": "Cancelled on the KeepKey",
+		"noConfirmation": "No confirmation on the KeepKey in time",
+		"refused": "The KeepKey refused the request",
+		"pinInvalid": "Wrong security key PIN",
+		"pinBlocked": "The security key PIN is blocked. Erasing passkeys is the only way to clear it",
+		"pinAuthBlocked": "Too many wrong PINs. Unplug and replug the KeepKey, then try again",
+		"pinNotSet": "No security key PIN is set yet",
+		"pinTooShort": "The PIN must be at least 4 characters",
+		"pinLength": "The PIN must be 4 to 63 characters",
+		"noCredential": "That passkey is no longer on the KeepKey",
+		"invalidId": "That passkey could not be read. Refresh the list and try again.",
+		"resetNeedsReplug": "Erasing is only allowed within 10 seconds of the KeepKey powering up",
+		"resetDeclined": "Erasing was declined on the KeepKey",
+		"resetNoPress": "No button press on the KeepKey in time",
+		"replugTimeout": "The KeepKey was not unplugged and plugged back in in time",
+		"unexpected": "The KeepKey sent an unexpected answer. Try again.",
+		"unexpectedCode": "The KeepKey sent an unexpected answer ({{code}}). Try again.",
+		"busy": "KeepKey is busy with another request. Wait for it to finish, then try again."
 	}
 }

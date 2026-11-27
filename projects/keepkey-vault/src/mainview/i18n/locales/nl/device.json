@@ -151,5 +151,28 @@
 		"waiting": "Wachten tot het apparaat beschikbaar is...",
 		"supportLink": "Nog steeds problemen? Dien een ticket in",
 		"defaultError": "Apparaat bezet door een ander proces"
+	},
+	"passkeys": {
+		"noDevice": "Geen FIDO-interface van de KeepKey gevonden. Sluit de KeepKey aan (firmware 7.16 of nieuwer).",
+		"noAnswer": "De KeepKey reageerde niet op tijd. Probeer het opnieuw.",
+		"declined": "Geweigerd op de KeepKey",
+		"cancelled": "Geannuleerd op de KeepKey",
+		"noConfirmation": "Geen bevestiging op de KeepKey op tijd",
+		"refused": "De KeepKey heeft het verzoek geweigerd",
+		"pinInvalid": "Onjuiste pincode van de beveiligingssleutel",
+		"pinBlocked": "De pincode van de beveiligingssleutel is geblokkeerd. Alleen het wissen van de toegangssleutels heft dit op",
+		"pinAuthBlocked": "Te veel onjuiste pincodes. Koppel de KeepKey los en sluit hem weer aan, probeer het dan opnieuw",
+		"pinNotSet": "Er is nog geen pincode voor de beveiligingssleutel ingesteld",
+		"pinTooShort": "De pincode moet minimaal 4 tekens hebben",
+		"pinLength": "De pincode moet 4 tot 63 tekens hebben",
+		"noCredential": "Die toegangssleutel staat niet meer op de KeepKey",
+		"invalidId": "Die toegangssleutel kon niet worden gelezen. Vernieuw de lijst en probeer het opnieuw.",
+		"resetNeedsReplug": "Wissen kan alleen binnen 10 seconden nadat de KeepKey is opgestart",
+		"resetDeclined": "Wissen is geweigerd op de KeepKey",
+		"resetNoPress": "De knop op de KeepKey is niet op tijd ingedrukt",
+		"replugTimeout": "De KeepKey is niet op tijd losgekoppeld en weer aangesloten",
+		"unexpected": "De KeepKey gaf een onverwacht antwoord. Probeer het opnieuw.",
+		"unexpectedCode": "De KeepKey gaf een onverwacht antwoord ({{code}}). Probeer het opnieuw.",
+		"busy": "De KeepKey is bezig met een ander verzoek. Wacht tot dat klaar is en probeer het opnieuw."
 	}
 }

@@ -151,5 +151,28 @@
 		"wordNotFoundTitle": "Wort nicht erkannt",
 		"wordNotFoundMessage": "Die eingegebenen Zeichen entsprechen keinem gültigen BIP39-Seed-Wort. Überprüfen Sie die verschlüsselten Buchstaben auf dem Bildschirm Ihres KeepKey.",
 		"wordNotFoundRestarting": "Neustart ab Wort 1 – bitte geben Sie Ihre Wörter erneut ein..."
+	},
+	"passkeys": {
+		"noDevice": "Keine FIDO-Schnittstelle des KeepKey gefunden. Schließe den KeepKey an (Firmware 7.16 oder neuer).",
+		"noAnswer": "Der KeepKey hat nicht rechtzeitig geantwortet. Versuche es erneut.",
+		"declined": "Auf dem KeepKey abgelehnt",
+		"cancelled": "Auf dem KeepKey abgebrochen",
+		"noConfirmation": "Keine rechtzeitige Bestätigung auf dem KeepKey",
+		"refused": "Der KeepKey hat die Anfrage abgelehnt",
+		"pinInvalid": "Falsche Sicherheitsschlüssel-PIN",
+		"pinBlocked": "Die Sicherheitsschlüssel-PIN ist gesperrt. Nur das Löschen der Passkeys hebt die Sperre auf",
+		"pinAuthBlocked": "Zu viele falsche PINs. Trenne den KeepKey, schließe ihn wieder an und versuche es erneut",
+		"pinNotSet": "Es ist noch keine Sicherheitsschlüssel-PIN festgelegt",
+		"pinTooShort": "Die PIN muss mindestens 4 Zeichen haben",
+		"pinLength": "Die PIN muss 4 bis 63 Zeichen haben",
+		"noCredential": "Dieser Passkey ist nicht mehr auf dem KeepKey",
+		"invalidId": "Dieser Passkey konnte nicht gelesen werden. Aktualisiere die Liste und versuche es erneut.",
+		"resetNeedsReplug": "Löschen ist nur innerhalb von 10 Sekunden nach dem Einschalten des KeepKey möglich",
+		"resetDeclined": "Das Löschen wurde auf dem KeepKey abgelehnt",
+		"resetNoPress": "Die Taste am KeepKey wurde nicht rechtzeitig gedrückt",
+		"replugTimeout": "Der KeepKey wurde nicht rechtzeitig getrennt und wieder angeschlossen",
+		"unexpected": "Der KeepKey hat unerwartet geantwortet. Versuche es erneut.",
+		"unexpectedCode": "Der KeepKey hat unerwartet geantwortet ({{code}}). Versuche es erneut.",
+		"busy": "Der KeepKey ist mit einer anderen Anfrage beschäftigt. Warte, bis sie fertig ist, und versuche es dann erneut."
 	}
 }

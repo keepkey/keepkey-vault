@@ -10,6 +10,7 @@
  * a CTAP library for two commands would be bigger than this file.
  */
 import type { PasskeyStatus, PasskeyResetResult } from '../shared/types'
+import { passkeyErrorMessage } from '../shared/passkey-errors'
 
 export const KEEPKEY_VID = 0x2b24
 const FIDO_USAGE_PAGE = 0xf1d0
@@ -79,7 +80,7 @@ export class Channel {
   private async recv(deadline: number, onKeepalive?: (status: number) => void): Promise<{ cmd: number; data: number[] }> {
     let cmd = -1; let want = 0; let data: number[] = []; let nextSeq = 0
     for (;;) {
-      if (Date.now() > deadline) throw new PasskeyError('timeout', 'The KeepKey did not answer in time')
+      if (Date.now() > deadline) throw new PasskeyError('timeout', passkeyErrorMessage('noAnswer'))
       const p = this.hid.readTimeout(50)
       if (!p.length) { await new Promise(r => setTimeout(r, 0)); continue }
       const cid = ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]
@@ -88,7 +89,7 @@ export class Channel {
         if (p[4] === CMD.KEEPALIVE) { onKeepalive?.(p[7]); continue }
         cmd = p[4]; want = (p[5] << 8) | p[6]; data = p.slice(7, 7 + want); nextSeq = 0
       } else if (cmd >= 0) {
-        if (p[4] !== nextSeq++) throw new PasskeyError('protocol', 'Out-of-order CTAPHID packet')
+        if (p[4] !== nextSeq++) throw new PasskeyError('protocol', passkeyErrorMessage('outOfOrder'))
         data = data.concat(p.slice(5, 5 + (want - data.length)))
       } else continue
       if (cmd >= 0 && data.length >= want) return { cmd, data }
@@ -97,7 +98,7 @@ export class Channel {
   async call(cmd: number, payload: number[], timeoutMs: number, onKeepalive?: (status: number) => void) {
     this.send(cmd, payload)
     const r = await this.recv(Date.now() + timeoutMs, onKeepalive)
-    if (r.cmd === CMD.ERROR) throw new PasskeyError(r.data[0] === 0x06 ? 'busy' : 'protocol', `CTAPHID error 0x${(r.data[0] ?? 0).toString(16)}`)
+    if (r.cmd === CMD.ERROR) throw new PasskeyError(r.data[0] === 0x06 ? 'busy' : 'protocol', passkeyErrorMessage('ctaphid', { code: `0x${(r.data[0] ?? 0).toString(16)}` }))
     return r.data
   }
   /** One CBOR request: returns the CTAP status byte and the decoded-ready body. */
@@ -113,7 +114,7 @@ export class Channel {
     const deadline = Date.now() + 3000
     for (;;) {
       const p = this.hid.readTimeout(100)
-      if (Date.now() > deadline) throw new PasskeyError('timeout', 'The KeepKey FIDO interface did not answer')
+      if (Date.now() > deadline) throw new PasskeyError('timeout', passkeyErrorMessage('fidoNoAnswer'))
       if (p.length && (p[4] & 0xff) === CMD.INIT && nonce.every((b, i) => p[7 + i] === b)) {
         this.cid = ((p[15] << 24) >>> 0) + (p[16] << 16) + (p[17] << 8) + p[18]
         return { deviceVersion: `${p[20]}.${p[21]}.${p[22]}` }
@@ -128,7 +129,7 @@ export async function readStatus(hid: HidLike): Promise<PasskeyStatus> {
   const ch = new Channel(hid)
   const { deviceVersion } = await ch.init()
   const info = await ch.call(CMD.CBOR, [CTAP2.GET_INFO], 5000)
-  if (ctapStatus(info) !== 0) throw new PasskeyError('protocol', `GetInfo failed (0x${ctapStatus(info).toString(16)})`)
+  if (ctapStatus(info) !== 0) throw new PasskeyError('protocol', passkeyErrorMessage('getInfo', { code: `0x${ctapStatus(info).toString(16)}` }))
   const m = cborDecode(Uint8Array.from(info.slice(1))) as Map<number, any>
   const options = (m.get(4) as Map<string, boolean>) ?? new Map()
   const aaguid = m.get(3) instanceof Uint8Array ? Array.from(m.get(3) as Uint8Array).map(b => b.toString(16).padStart(2, '0')).join('') : ''
@@ -156,10 +157,10 @@ export async function runReset(hid: HidLike, onWaiting?: () => void): Promise<Pa
   const s = ctapStatus(data)
   if (s === 0) return { reset: true }
   // CTAP allows reset only shortly after the authenticator powers up (RC4: 10 s).
-  if (s === 0x30) throw new PasskeyError('replug', 'Reset is only allowed within 10 seconds of the KeepKey powering up')
-  if (s === 0x27 || s === 0x2d) throw new PasskeyError('denied', 'Reset was declined on the KeepKey')
-  if (s === 0x2f) throw new PasskeyError('timeout', 'No button press on the KeepKey in time')
-  throw new PasskeyError('protocol', `Reset failed (0x${s.toString(16)})`)
+  if (s === 0x30) throw new PasskeyError('replug', passkeyErrorMessage('resetNeedsReplug'))
+  if (s === 0x27 || s === 0x2d) throw new PasskeyError('denied', passkeyErrorMessage('resetDeclined'))
+  if (s === 0x2f) throw new PasskeyError('timeout', passkeyErrorMessage('resetNoPress'))
+  throw new PasskeyError('protocol', passkeyErrorMessage('reset', { code: `0x${s.toString(16)}` }))
 }
 
 // ── node-hid binding (kept out of the pure functions above so they test without hardware) ──
@@ -175,7 +176,7 @@ async function openAndRun<T>(fn: (hid: HidLike) => Promise<T>): Promise<T> {
   try {
     const lib = await hidLib()
     const fido = findFido(lib)
-    if (!fido?.path) throw new PasskeyError('no_device', 'No KeepKey FIDO interface found. Connect the KeepKey (firmware 7.16 or newer).')
+    if (!fido?.path) throw new PasskeyError('no_device', passkeyErrorMessage('noDevice'))
     hid = new lib.HID(fido.path) as HidLike
     return await fn(hid)
   } finally {
@@ -205,5 +206,5 @@ export async function waitForReplug(timeoutMs = 60_000, poll = 250): Promise<voi
     else if (gone) return
     await new Promise(r => setTimeout(r, poll))
   }
-  throw new PasskeyError('timeout', 'The KeepKey was not unplugged and plugged back in in time')
+  throw new PasskeyError('timeout', passkeyErrorMessage('replugTimeout'))
 }

@@ -151,5 +151,28 @@
 		"wordNotFoundTitle": "단어를 인식하지 못함",
 		"wordNotFoundMessage": "입력한 문자가 유효한 BIP39 시드 단어와 일치하지 않습니다. KeepKey 화면의 섞인 문자를 다시 확인하세요.",
 		"wordNotFoundRestarting": "단어 1부터 다시 시작합니다 — 단어를 다시 입력하세요..."
+	},
+	"passkeys": {
+		"noDevice": "KeepKey의 FIDO 인터페이스를 찾을 수 없습니다. KeepKey(펌웨어 7.16 이상)를 연결하세요.",
+		"noAnswer": "KeepKey가 제시간에 응답하지 않았습니다. 다시 시도하세요.",
+		"declined": "KeepKey에서 거부됨",
+		"cancelled": "KeepKey에서 취소됨",
+		"noConfirmation": "KeepKey에서 제시간에 확인하지 않았습니다",
+		"refused": "KeepKey가 요청을 거부했습니다",
+		"pinInvalid": "보안 키 PIN이 올바르지 않습니다",
+		"pinBlocked": "보안 키 PIN이 잠겼습니다. 패스키를 지우는 것만이 해제하는 방법입니다",
+		"pinAuthBlocked": "잘못된 PIN을 너무 많이 입력했습니다. KeepKey를 뽑았다가 다시 꽂은 뒤 다시 시도하세요",
+		"pinNotSet": "보안 키 PIN이 아직 설정되지 않았습니다",
+		"pinTooShort": "PIN은 4자 이상이어야 합니다",
+		"pinLength": "PIN은 4~63자여야 합니다",
+		"noCredential": "해당 패스키가 더 이상 KeepKey에 없습니다",
+		"invalidId": "해당 패스키를 읽을 수 없습니다. 목록을 새로 고친 뒤 다시 시도하세요.",
+		"resetNeedsReplug": "지우기는 KeepKey 전원이 켜진 후 10초 이내에만 할 수 있습니다",
+		"resetDeclined": "KeepKey에서 지우기를 거부했습니다",
+		"resetNoPress": "KeepKey의 버튼을 제시간에 누르지 않았습니다",
+		"replugTimeout": "KeepKey를 제시간에 뽑았다가 다시 꽂지 않았습니다",
+		"unexpected": "KeepKey가 예상치 못한 응답을 보냈습니다. 다시 시도하세요.",
+		"unexpectedCode": "KeepKey가 예상치 못한 응답을 보냈습니다({{code}}). 다시 시도하세요.",
+		"busy": "KeepKey가 다른 요청을 처리 중입니다. 끝날 때까지 기다린 뒤 다시 시도하세요."
 	}
 }

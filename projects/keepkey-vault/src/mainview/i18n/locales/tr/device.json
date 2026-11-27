@@ -151,5 +151,28 @@
 		"waiting": "Cihazın kullanılabilir olması bekleniyor...",
 		"supportLink": "Hâlâ sorun mu yaşıyorsunuz? Destek talebi oluşturun",
 		"defaultError": "Cihaz başka bir işlem tarafından meşgul"
+	},
+	"passkeys": {
+		"noDevice": "KeepKey FIDO arayüzü bulunamadı. KeepKey'i bağlayın (yazılım 7.16 veya daha yeni).",
+		"noAnswer": "KeepKey zamanında yanıt vermedi. Tekrar deneyin.",
+		"declined": "KeepKey'de reddedildi",
+		"cancelled": "KeepKey'de iptal edildi",
+		"noConfirmation": "KeepKey'de zamanında onay verilmedi",
+		"refused": "KeepKey isteği reddetti",
+		"pinInvalid": "Güvenlik anahtarı PIN'i yanlış",
+		"pinBlocked": "Güvenlik anahtarı PIN'i engellendi. Temizlemenin tek yolu geçiş anahtarlarını silmek",
+		"pinAuthBlocked": "Çok fazla yanlış PIN. KeepKey'i çıkarıp yeniden takın, sonra tekrar deneyin",
+		"pinNotSet": "Henüz güvenlik anahtarı PIN'i ayarlanmadı",
+		"pinTooShort": "PIN en az 4 karakter olmalı",
+		"pinLength": "PIN 4 ile 63 karakter arasında olmalı",
+		"noCredential": "Bu geçiş anahtarı artık KeepKey'de değil",
+		"invalidId": "Bu geçiş anahtarı okunamadı. Listeyi yenileyip tekrar deneyin.",
+		"resetNeedsReplug": "Silme yalnızca KeepKey açıldıktan sonraki 10 saniye içinde yapılabilir",
+		"resetDeclined": "Silme işlemi KeepKey'de reddedildi",
+		"resetNoPress": "KeepKey'deki düğmeye zamanında basılmadı",
+		"replugTimeout": "KeepKey zamanında çıkarılıp yeniden takılmadı",
+		"unexpected": "KeepKey beklenmeyen bir yanıt gönderdi. Tekrar deneyin.",
+		"unexpectedCode": "KeepKey beklenmeyen bir yanıt gönderdi ({{code}}). Tekrar deneyin.",
+		"busy": "KeepKey başka bir istekle meşgul. Bitmesini bekleyip tekrar deneyin."
 	}
 }

@@ -11,6 +11,7 @@
  */
 import { createCipheriv, createDecipheriv, createECDH, createHash, createHmac } from 'node:crypto'
 import { Channel, PasskeyError, cborDecode, type HidLike } from './passkeys'
+import { passkeyErrorMessage, type PasskeyErrorKind } from '../shared/passkey-errors'
 
 const CLIENT_PIN = 0x06
 const CRED_MGMT = 0x0a
@@ -48,20 +49,21 @@ const hmac16 = (key: Uint8Array, ...parts: Uint8Array[]) => {
 }
 
 function fail(status: number, retries?: number): never {
-  const by: Record<number, [ConstructorParameters<typeof PasskeyError>[0], string]> = {
-    0x27: ['denied', 'Declined on the KeepKey'],
-    0x2d: ['denied', 'Cancelled on the KeepKey'],
-    0x2e: ['no_credential', 'That passkey is no longer on the KeepKey'],
-    0x2f: ['timeout', 'No confirmation on the KeepKey in time'],
-    0x30: ['protocol', 'The KeepKey refused the request'],
-    0x31: ['pin_invalid', 'Wrong security key PIN'],
-    0x32: ['pin_blocked', 'The security key PIN is blocked. Erasing passkeys is the only way to clear it'],
-    0x34: ['pin_auth_blocked', 'Too many wrong PINs. Unplug and replug the KeepKey, then try again'],
-    0x35: ['pin_not_set', 'No security key PIN is set yet'],
-    0x37: ['pin_policy', 'The PIN must be at least 4 characters'],
+  const by: Record<number, [ConstructorParameters<typeof PasskeyError>[0], PasskeyErrorKind]> = {
+    0x27: ['denied', 'declined'],
+    0x2d: ['denied', 'cancelled'],
+    0x2e: ['no_credential', 'noCredential'],
+    0x2f: ['timeout', 'noConfirmation'],
+    0x30: ['protocol', 'refused'],
+    0x31: ['pin_invalid', 'pinInvalid'],
+    0x32: ['pin_blocked', 'pinBlocked'],
+    0x34: ['pin_auth_blocked', 'pinAuthBlocked'],
+    0x35: ['pin_not_set', 'pinNotSet'],
+    0x37: ['pin_policy', 'pinTooShort'],
   }
-  const [code, message] = by[status] ?? ['protocol', `The KeepKey returned error 0x${status.toString(16)}`]
-  throw new PasskeyError(code, message, retries)
+  const known = by[status]
+  if (known) throw new PasskeyError(known[0], passkeyErrorMessage(known[1]), retries)
+  throw new PasskeyError('protocol', passkeyErrorMessage('status', { code: `0x${status.toString(16)}` }), retries)
 }
 
 async function retriesLeft(ch: Channel): Promise<number | undefined> {
@@ -74,7 +76,7 @@ async function keyAgreement(ch: Channel) {
   if (r.status !== 0) fail(r.status)
   const cose = (cborDecode(r.body) as Map<number, Map<number, Uint8Array>>).get(1)
   const x = cose?.get(-2), y = cose?.get(-3)
-  if (!x || !y) throw new PasskeyError('protocol', 'The KeepKey sent no key agreement key')
+  if (!x || !y) throw new PasskeyError('protocol', passkeyErrorMessage('noKeyAgreement'))
   const ecdh = createECDH('prime256v1'); ecdh.generateKeys()
   const shared = ecdh.computeSecret(Uint8Array.from([4, ...x, ...y]))
   const pub = ecdh.getPublicKey()
@@ -91,13 +93,13 @@ async function managementToken(ch: Channel, pin: string): Promise<Uint8Array> {
   const r = await ch.cbor([CLIENT_PIN, ...cborEncode(req)])
   if (r.status !== 0) fail(r.status, r.status === 0x31 ? await retriesLeft(ch) : undefined)
   const enc = (cborDecode(r.body) as Map<number, Uint8Array>).get(2)
-  if (!enc || enc.length !== 32) throw new PasskeyError('protocol', 'The KeepKey sent an unexpected PIN token')
+  if (!enc || enc.length !== 32) throw new PasskeyError('protocol', passkeyErrorMessage('badPinToken'))
   return aes(false, ka.secret, enc)
 }
 
 export async function setFidoPin(hid: HidLike, pin: string): Promise<void> {
   const bytes = new TextEncoder().encode(pin)
-  if (bytes.length < 4 || bytes.length > 63) throw new PasskeyError('pin_policy', 'The PIN must be 4 to 63 characters')
+  if (bytes.length < 4 || bytes.length > 63) throw new PasskeyError('pin_policy', passkeyErrorMessage('pinLength'))
   const ch = new Channel(hid); await ch.init()
   const ka = await keyAgreement(ch)
   const padded = new Uint8Array(64); padded.set(bytes)
@@ -153,7 +155,7 @@ export async function listPasskeys(hid: HidLike, pin: string): Promise<PasskeyIn
 
 /** Deletes one discoverable passkey. The KeepKey asks for a hold-to-confirm; this waits for it. */
 export async function deletePasskey(hid: HidLike, pin: string, credentialIdHex: string, onWaiting?: () => void): Promise<void> {
-  if (!/^[0-9a-f]{128}$/.test(credentialIdHex)) throw new PasskeyError('protocol', 'Invalid passkey id')
+  if (!/^[0-9a-f]{128}$/.test(credentialIdHex)) throw new PasskeyError('protocol', passkeyErrorMessage('invalidId'))
   const ch = new Channel(hid); await ch.init()
   const token = await managementToken(ch, pin)
   const descriptor = new Map<string, unknown>([['id', new Uint8Array(Buffer.from(credentialIdHex, 'hex'))], ['type', 'public-key']])

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Box, Button, Flex, Input, Text } from '@chakra-ui/react'
+import { useTranslation } from 'react-i18next'
 import type { PasskeyInventoryView, PasskeyResetResult, PasskeySlotView, PasskeyStatus } from '../../shared/types'
 import { rpcRequest } from '../lib/rpc'
 import { useUiTranslation } from '../i18n/ui'
+import { describePasskeyError } from '../../shared/passkey-errors'
 
 type ResetPhase = 'idle' | 'confirm' | 'working' | 'replug' | 'done'
 
@@ -10,6 +12,12 @@ type ResetPhase = 'idle' | 'confirm' | 'working' | 'replug' | 'done'
  * The security-key PIN is held only in this component's memory while the tab is open. */
 export function PasskeysView() {
   const uiText = useUiTranslation()
+  const { t } = useTranslation('device')
+  // The KeepKey's errors arrive in English over the RPC; show them in the UI language.
+  const errorText = useCallback((e: any, fallback: string) => {
+    const message = typeof e?.message === 'string' ? e.message : ''
+    return (message && describePasskeyError(message, t)) || message || fallback
+  }, [t])
   const [status, setStatus] = useState<PasskeyStatus | null>(null)
   const [inventory, setInventory] = useState<PasskeyInventoryView | null>(null)
   const [error, setError] = useState('')
@@ -22,10 +30,11 @@ export function PasskeysView() {
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; pin.current = '' } }, [])
 
-  const loadStatus = useCallback(async () => {
-    try { const s = await rpcRequest<PasskeyStatus>('passkeysStatus', undefined, 15000); if (mounted.current) { setStatus(s); setError('') } }
-    catch (e: any) { if (mounted.current) { setStatus(null); setError(e?.message || uiText('Could not reach the KeepKey passkey interface')) } }
-  }, [uiText])
+  // After a failed action the status is re-read with keepError, so that action's error stays on screen.
+  const loadStatus = useCallback(async (keepError = false) => {
+    try { const s = await rpcRequest<PasskeyStatus>('passkeysStatus', undefined, 15000); if (mounted.current) { setStatus(s); if (!keepError) setError('') } }
+    catch (e: any) { if (mounted.current) { setStatus(null); setError(errorText(e, uiText('Could not reach the KeepKey passkey interface'))) } }
+  }, [errorText, uiText])
   useEffect(() => { void loadStatus() }, [loadStatus])
 
   const loadList = useCallback(async (usePin: string) => {
@@ -35,7 +44,7 @@ export function PasskeysView() {
   const run = async (work: () => Promise<void>) => {
     if (busy) return
     setBusy(true); setError('')
-    try { await work() } catch (e: any) { if (mounted.current) { setError(e?.message || uiText('Something went wrong')); void loadStatus() } }
+    try { await work() } catch (e: any) { if (mounted.current) { setError(errorText(e, uiText('Something went wrong'))); void loadStatus(true) } }
     finally { if (mounted.current) setBusy(false) }
   }
 
@@ -75,7 +84,7 @@ export function PasskeysView() {
       <Flex direction="column" gap="3">
         <Flex justify="space-between" align="center" gap="3" wrap="wrap">
           <Text fontSize="lg" fontWeight="600" color="kk.textPrimary">{uiText('Passkeys')}</Text>
-          {status && <Text fontSize="sm" color="kk.textSecondary">{uiText('Security key PIN')}: {status.pinSet ? `${uiText('set')}${status.pinRetries != null ? ` (${status.pinRetries})` : ''}` : uiText('not set')}</Text>}
+          {status && <Text fontSize="sm" color="kk.textSecondary">{!status.pinSet ? uiText('Security key PIN: not set') : status.pinRetries != null ? uiText('Security key PIN: set ({{retries}} attempts left)', { retries: status.pinRetries }) : uiText('Security key PIN: set')}</Text>}
         </Flex>
         {error && <Text role="alert" fontSize="sm" color="kk.error">{error}</Text>}
 
@@ -104,7 +113,7 @@ export function PasskeysView() {
         {inventory && (
           <Flex direction="column" gap="2">
             <Flex justify="space-between" align="center">
-              <Text fontSize="sm" color="kk.textPrimary">{inventory.used} / {capacity} {uiText('slots used')}</Text>
+              <Text fontSize="sm" color="kk.textPrimary">{uiText('{{used}} of {{capacity}} slots used', { used: inventory.used, capacity })}</Text>
               <Button size="xs" variant="ghost" onClick={() => void run(() => loadList(pin.current))} disabled={busy}>{uiText('Refresh')}</Button>
             </Flex>
             {inventory.slots.map(s => tile(
@@ -128,7 +137,7 @@ export function PasskeysView() {
                   </Flex>
                 ) : (
                   <Flex gap="2">
-                    <Button size="xs" variant="ghost" onClick={() => setRenaming({ rpHash: s.rpHash, draft: s.label })} disabled={busy}>{uiText('Name')}</Button>
+                    <Button size="xs" variant="ghost" onClick={() => setRenaming({ rpHash: s.rpHash, draft: s.label })} disabled={busy}>{uiText('Rename')}</Button>
                     <Button size="xs" variant="outline" colorPalette="red" onClick={() => setDeleting({ id: s.credentialId, confirmed: false })} disabled={busy}>{uiText('Delete')}</Button>
                   </Flex>
                 )}
