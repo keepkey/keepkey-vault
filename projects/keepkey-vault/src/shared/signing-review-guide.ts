@@ -1,5 +1,5 @@
 import type { SigningRequestInfo } from './types'
-import { utxoPreview } from './utxoPreview'
+import { isVerifiedChange, utxoPreview } from './utxoPreview'
 import { cosmosTxPreview } from './cosmosTxPreview'
 import { evmMaxFee, evmNativeValue } from './evmFeePreview'
 import { evmChainLabel } from './chains'
@@ -74,12 +74,12 @@ export function signingReviewGuide(request: SigningRequestInfo): SigningReviewGu
   }
   const utxo = request.method === '/utxo/sign-transaction' ? utxoPreview(request.rawRequestBody) : undefined
   if (utxo) {
-    utxo.sends.forEach((output, i) => { add(`Output ${i + 1} address`, output.address); add(`Output ${i + 1} amount`, output.amount) })
+    utxo.sends.forEach((output, i) => { add(`Output ${i + 1} address${output.unverified ? ' (unverified change)' : ''}`, output.address); add(`Output ${i + 1} amount`, output.amount) })
     add('Network fee', utxo.fee); add('Memo', utxo.memo)
     if (utxo.warning) warnings.push(utxo.warning)
   } else if (request.method === '/utxo/sign-transaction' && Array.isArray(request.rawRequestBody?.outputs)) {
     request.rawRequestBody.outputs.forEach((output: any, i: number) => {
-      if (output?.isChange || output?.addressType === 'change') return
+      if (isVerifiedChange(output)) return
       add(`Output ${i + 1} address`, output?.address)
       if (typeof output?.amount === 'string' && /^[0-9]+$/.test(output.amount)) add(`Output ${i + 1} amount`, `${output.amount} base units`)
     })

@@ -1480,7 +1480,7 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 					{utxo && (
 						<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
 							<Text fontSize="xs" fontWeight="700" color="white">{utxo.coin}{" "}{uiText("transaction")}</Text>
-							{utxo.sends.map((send, index) => <Box key={index}><Row label={`Send ${index + 1}`} value={send.amount} /><Row label={uiText("To")} value={send.address} /></Box>)}
+							{utxo.sends.map((send, index) => <Box key={index}><Row label={send.unverified ? `Send ${index + 1} (unverified)` : `Send ${index + 1}`} value={send.amount} /><Row label={uiText("To")} value={send.address} /></Box>)}
 							{utxo.change.map((amount, index) => <Row key={index} label={`Change ${index + 1}`} value={amount} />)}
 							<Row label={uiText("Network fee")} value={utxo.fee} />
 							{utxo.swap && <><Row label={uiText("Memo output asset")} value={utxo.swap.asset} /><Row label={uiText("Memo destination")} value={utxo.swap.destination} /><Row label={uiText("Memo minimum")} value={utxo.swap.minimum} /><Row label={uiText("Memo affiliate fee")} value={utxo.swap.affiliate} /></>}

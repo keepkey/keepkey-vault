@@ -2,7 +2,8 @@
  * memo describes claimed intent; it does not authenticate the vault/router. */
 export interface UtxoPreview {
   coin: string
-  sends: { address: string; amount: string }[]
+  /** `unverified`: marked as change, but with no KeepKey derivation path. */
+  sends: { address: string; amount: string; unverified?: boolean }[]
   change: string[]
   fee?: string
   memo?: string
@@ -32,6 +33,19 @@ function minimum(raw: string, asset: string): string {
   return `${units / 100000000n}.${(units % 100000000n).toString().padStart(8, '0')} ${asset}`
 }
 
+/**
+ * Change is only change when the KeepKey derives its address (addressNList).
+ * An `isChange` flag or `addressType: 'change'` alone is the caller's claim:
+ * such an output may pay anyone, so it is reviewed as a send.
+ */
+export function isVerifiedChange(output: any): boolean {
+  return !!(output?.isChange || output?.addressType === 'change')
+    && Array.isArray(output?.addressNList) && output.addressNList.length > 0
+}
+function claimsChange(output: any): boolean {
+  return !!(output?.isChange || output?.addressType === 'change')
+}
+
 export function utxoPreview(payload: unknown): UtxoPreview | undefined {
   if (!payload || typeof payload !== 'object') return undefined
   const tx = payload as Record<string, any>
@@ -43,6 +57,7 @@ export function utxoPreview(payload: unknown): UtxoPreview | undefined {
   let amountsComplete = true
   let memo: string | undefined
   let memoPresent = false
+  let unverifiedChange = 0
   for (const output of tx.outputs) {
     const amount = sats(output?.amount)
     if (amount === undefined) amountsComplete = false
@@ -50,11 +65,13 @@ export function utxoPreview(payload: unknown): UtxoPreview | undefined {
     if (output?.opReturnData !== undefined) {
       memoPresent = true
       memo = memoText(output.opReturnData)
-    } else if (output?.isChange || output?.addressType === 'change') {
+    } else if (isVerifiedChange(output)) {
       change.push(amount === undefined ? `Unknown ${unit} amount` : display(amount,unit))
     } else {
+      const unverified = claimsChange(output)
+      if (unverified) unverifiedChange++
       sends.push({ address: typeof output?.address === 'string' ? output.address : 'Address not supplied',
-        amount: amount === undefined ? `Unknown ${unit} amount` : display(amount,unit) })
+        amount: amount === undefined ? `Unknown ${unit} amount` : display(amount,unit), ...(unverified ? { unverified } : {}) })
     }
   }
   const inputs = tx.inputs.map((input: any) => sats(input?.amount))
@@ -72,5 +89,9 @@ export function utxoPreview(payload: unknown): UtxoPreview | undefined {
     }
   }
   if (memoPresent && !memo) preview.warning = 'OP_RETURN data is present but cannot be shown as readable text. Review the raw payload and device.'
+  if (unverifiedChange) {
+    const note = `${unverifiedChange === 1 ? 'An output is' : `${unverifiedChange} outputs are`} marked as change without a KeepKey path, so ${unverifiedChange === 1 ? 'it is' : 'they are'} listed as a send (unverified). Check the address before you sign.`
+    preview.warning = preview.warning ? `${preview.warning} ${note}` : note
+  }
   return preview
 }

@@ -7,7 +7,7 @@ describe('UTXO signing preview', () => {
     const preview = utxoPreview({ coin: 'Bitcoin',
       inputs: [{ amount: '100002712' }], outputs: [
         { address: 'bc1vault', amount: '6000000' },
-        { addressType: 'change', isChange: true, amount: '94000000' },
+        { addressType: 'change', isChange: true, addressNList: [0x80000054, 0x80000000, 0x80000000, 1, 0], amount: '94000000' },
         { amount: '0', opReturnData: btoa(memo) },
       ] })
     expect(preview?.sends).toEqual([{ address: 'bc1vault', amount: '0.06000000 BTC' }])
@@ -36,5 +36,44 @@ describe('UTXO signing preview', () => {
     expect(preview?.sends[0].amount).toBe('0.12000000 LTC')
     expect(preview?.fee).toBe('0.00001152 LTC')
     expect(preview?.warning).toContain('LTC vault address')
+  })
+})
+
+describe('change must be derived by the KeepKey (KEEPKEY-156)', () => {
+  test('a change output with addressNList stays change', () => {
+    const preview = utxoPreview({ coin: 'Bitcoin', inputs: [{ amount: '100000000' }], outputs: [
+      { address: 'bc1dest', amount: '6000000' },
+      { addressType: 'change', isChange: true, addressNList: [0x80000054, 0x80000000, 0x80000000, 1, 0], amount: '93990000' },
+    ] })
+    expect(preview?.change).toEqual(['0.93990000 BTC'])
+    expect(preview?.sends).toEqual([{ address: 'bc1dest', amount: '0.06000000 BTC' }])
+    expect(preview?.warning).toBeUndefined()
+  })
+
+  test('a "change" output without addressNList is listed as an unverified send, with its address and a warning', () => {
+    const preview = utxoPreview({ coin: 'Bitcoin', inputs: [{ amount: '100000000' }], outputs: [
+      { address: 'bc1dest', amount: '6000000' },
+      { address: 'bc1attacker', addressType: 'change', isChange: true, amount: '93990000' },
+    ] })
+    expect(preview?.change).toEqual([])
+    expect(preview?.sends).toEqual([
+      { address: 'bc1dest', amount: '0.06000000 BTC' },
+      { address: 'bc1attacker', amount: '0.93990000 BTC', unverified: true },
+    ])
+    expect(preview?.warning).toContain('unverified')
+  })
+
+  test('an empty addressNList is not a derivation path', () => {
+    const preview = utxoPreview({ coin: 'Bitcoin', inputs: [{ amount: '2' }], outputs: [{ address: 'bc1x', isChange: true, addressNList: [], amount: '1' }] })
+    expect(preview?.sends[0]?.unverified).toBe(true)
+  })
+
+  test('keeps the swap warning and adds the unverified-change note', () => {
+    const memo = '=:ETH.ETH:0x1111111111111111111111111111111111111111:1'
+    const preview = utxoPreview({ coin: 'Bitcoin', inputs: [{ amount: '3' }], outputs: [
+      { address: 'bc1vault', amount: '1' }, { address: 'bc1x', addressType: 'change', amount: '1' }, { amount: '0', opReturnData: btoa(memo) },
+    ] })
+    expect(preview?.warning).toContain('not independently verified')
+    expect(preview?.warning).toContain('unverified')
   })
 })
