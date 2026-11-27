@@ -250,3 +250,7 @@ App-relative paths:
 - The send hangs or is rejected.
 
 Report failures with the log excerpt and screenshots.
+
+## Windows box: compiling the Monero worker
+
+`bun run monero:build` compiles for `bun-windows-x64-baseline`. With the regular Windows Bun, Bun downloads the baseline runtime and fails with "Failed to extract executable for bun-windows-x64-baseline-v1.3.14". Install the official baseline Bun 1.3.14 (`bun-windows-x64-baseline.zip`, sha256 `538f9c846355d9e847b2671bc00c47da4229a0befb24df3282b739770f3b475f`) and set `MONERO_BUILD_BUN` to its `bun.exe` before building. CI does this in the `windows-unsigned` job.

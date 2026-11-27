@@ -1128,6 +1128,22 @@ jobs:
       # Official wallet RPC and node (signature- and hash-checked), the Monero worker,
       # and the reviewed native helpers once their win32-x64 pins exist. Until then the
       # build ships the wallet tools and Desktop keeps Monero unavailable.
+      # The Monero worker compiles for bun-windows-x64-baseline (runs on CPUs without
+      # AVX2). The runner's Bun is the regular build, so Bun would download the baseline
+      # runtime and fail to unpack it on Windows. Compiling with the baseline Bun itself
+      # needs no download. Pinned to the official bun-v1.3.14 SHASUMS256.txt entry.
+      - name: Install the baseline Bun that compiles the Monero worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/bun-baseline"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/bun.zip" https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-windows-x64-baseline.zip
+          echo "538f9c846355d9e847b2671bc00c47da4229a0befb24df3282b739770f3b475f  $dir/bun.zip" | sha256sum -c -
+          unzip -q "$dir/bun.zip" -d "$dir"
+          "$dir/bun-windows-x64-baseline/bun.exe" --version
+          echo "MONERO_BUILD_BUN=$dir/bun-windows-x64-baseline/bun.exe" >> "$GITHUB_ENV"
+
       - name: Prepare Monero tools and stage the reviewed helpers
         shell: bash
         run: |
