@@ -32,6 +32,7 @@
 	"ownWallet": "Mój portfel",
 	"ownSymbol": "Mój {{symbol}}",
 	"ownTransparent": "Mój przezroczysty adres {{symbol}}",
+	"ownUnified": "Mój zunifikowany adres {{symbol}}",
 	"edit": "Edytuj",
 	"delete": "Usuń",
 	"view": "Pokaż",

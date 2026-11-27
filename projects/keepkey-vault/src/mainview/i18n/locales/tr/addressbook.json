@@ -32,6 +32,7 @@
 	"ownWallet": "Cüzdanım",
 	"ownSymbol": "{{symbol}} hesabım",
 	"ownTransparent": "{{symbol}} şeffaf adresim",
+	"ownUnified": "{{symbol}} birleşik adresim",
 	"edit": "Düzenle",
 	"delete": "Sil",
 	"view": "Görüntüle",

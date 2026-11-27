@@ -32,6 +32,7 @@
 	"ownWallet": "Mon portefeuille",
 	"ownSymbol": "Mon {{symbol}}",
 	"ownTransparent": "Mon adresse transparente {{symbol}}",
+	"ownUnified": "Mon adresse unifiée {{symbol}}",
 	"edit": "Modifier",
 	"delete": "Supprimer",
 	"view": "Afficher",

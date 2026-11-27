@@ -32,6 +32,7 @@
 	"ownWallet": "Мой кошелёк",
 	"ownSymbol": "Мой {{symbol}}",
 	"ownTransparent": "Мой прозрачный адрес {{symbol}}",
+	"ownUnified": "Мой единый адрес {{symbol}}",
 	"edit": "Изменить",
 	"delete": "Удалить",
 	"view": "Открыть",

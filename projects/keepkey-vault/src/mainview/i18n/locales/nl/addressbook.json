@@ -32,6 +32,7 @@
 	"ownWallet": "Mijn wallet",
 	"ownSymbol": "Mijn {{symbol}}",
 	"ownTransparent": "Mijn transparante {{symbol}}-adres",
+	"ownUnified": "Mijn uniforme {{symbol}}-adres",
 	"edit": "Bewerken",
 	"delete": "Verwijderen",
 	"view": "Bekijken",
