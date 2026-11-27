@@ -113,6 +113,11 @@ def windows_link_command(cache, target_name, work):
         expanded += [native(a) for a in shlex.split((cache / arg[1:]).read_text())] if arg.startswith("@") else [native(arg)]
     command, dropped, inside = [], [], Path(work).resolve()
     for arg in expanded:
+        # Core adds this for MinGW shared libraries; it overrides the .def file and would
+        # export every OpenSSL, Boost and Core symbol instead of the two-symbol ABI.
+        if arg == "-Wl,--export-all-symbols":
+            dropped.append(arg)
+            continue
         library = None
         if arg.startswith("-l"):
             library = arg[2:]
