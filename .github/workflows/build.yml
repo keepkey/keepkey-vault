@@ -1158,6 +1158,16 @@ jobs:
           else
             echo "::warning::The manifests have no win32-x64 Monero helper pins yet; this build keeps Monero unavailable"
           fi
+          # The worker targets bun-windows-x64-baseline (runs on CPUs without AVX). Compiling it
+          # with setup-bun's non-baseline Bun makes Bun download and unpack that runtime, which
+          # fails on Windows; compile with the pinned baseline Bun itself instead.
+          BASELINE="$RUNNER_TEMP/bun-baseline"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/bun-baseline.zip" \
+            "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/bun-windows-x64-baseline.zip"
+          echo "538f9c846355d9e847b2671bc00c47da4229a0befb24df3282b739770f3b475f  $RUNNER_TEMP/bun-baseline.zip" | sha256sum -c -
+          python -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$RUNNER_TEMP/bun-baseline.zip" "$BASELINE"
+          export MONERO_BUILD_BUN="$BASELINE/bun-windows-x64-baseline/bun.exe"
+          "$MONERO_BUILD_BUN" --version
           bun run monero:build
 
       - name: Build (unsigned)
