@@ -164,9 +164,9 @@ function harness() {
       } finally { Bun.serve = serve }
     }
     const pending = (async () => {
-      const input = new Request(`http://window-focus.invalid${route}`, {
+      const input = new Request(`http://127.0.0.1:1646${route}`, {
         method: body === undefined ? 'GET' : 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...(access ? { 'X-KeepKey-Device-Access': access } : {}) },
+        headers: { Host: '127.0.0.1:1646', Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...(access ? { 'X-KeepKey-Device-Access': access } : {}) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       })
       const response = await required(handleRequest, 'production REST fetch router')(input, requestServer)
