@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { CHAINS } from '../src/shared/chains'
-import { eip681ValueToAmount, parseSendQr } from '../src/shared/send-qr'
+import { eip681ValueToAmount, parseSendQr, parseSendQrResult } from '../src/shared/send-qr'
 import { receivePaymentUri } from '../src/shared/receive-payment-uri'
 
 const chain = (id: string) => CHAINS.find(c => c.id === id)!
@@ -122,5 +122,22 @@ describe('TON deep links', () => {
   })
   test('an empty comment is no comment', () => {
     expect(parseSendQr(`ton://transfer/${uq}?text=`, ton)).toEqual({ recipient: uq, memo: '' })
+  })
+})
+
+describe('refusals carry a reason', () => {
+  const solana = chain('solana'), sol = '11111111111111111111111111111111'
+  test('Solana Pay reference is refused, never dropped', () => {
+    expect(parseSendQrResult(`solana:${sol}?amount=1&reference=${sol}`, solana)).toEqual({ ok: false, reason: 'unsupported' })
+  })
+  test('XRP tag / destination_tag map like dt; conflicting keys refuse', () => {
+    expect(parseSendQr(`xrp:${ripple}?tag=7`, xrp)?.memo).toBe('7')
+    expect(parseSendQr(`xrp:${ripple}?destination_tag=8`, xrp)?.memo).toBe('8')
+    expect(parseSendQrResult(`xrp:${ripple}?dt=7&tag=8`, xrp)).toEqual({ ok: false, reason: 'unsupported' })
+  })
+  test('each refusal names its cause', () => {
+    expect(parseSendQrResult(`bitcoin:${btc}`, ethereum)).toEqual({ ok: false, reason: 'network' })
+    expect(parseSendQrResult(`bitcoin:${btc}?amount=abc`, bitcoin)).toEqual({ ok: false, reason: 'amount' })
+    expect(parseSendQrResult('bitcoin:notanaddress', bitcoin)).toEqual({ ok: false, reason: 'address' })
   })
 })

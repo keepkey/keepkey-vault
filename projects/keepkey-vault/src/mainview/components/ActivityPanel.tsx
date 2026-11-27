@@ -157,11 +157,6 @@ function ConfBadge({ confirmations, chain }: { confirmations?: number; chain: st
   )
 }
 
-export function truncateTxid(txid: string): string {
-  if (txid.length <= 16) return txid
-  return txid.slice(0, 8) + '...' + txid.slice(-8)
-}
-
 export function timeAgo(ts: number): string {
   const diff = Date.now() - ts
   const formatter = new Intl.RelativeTimeFormat(i18n.resolvedLanguage || 'en', { numeric: 'auto' })
@@ -639,8 +634,8 @@ export function ActivityRow({ activity, onSelect, nativePrices }: { activity: Re
       </Flex>
       <Flex justify="space-between" align="center" gap="2" mt="1.5">
         {activity.txid ? (
-          <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(activity.txid!) }} title={copied ? uiText("Copied!") : uiText("Click to copy")}>
-            {copied ? uiText("Copied!") : truncateTxid(activity.txid)}
+          <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" wordBreak="break-all" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(activity.txid!) }} title={copied ? uiText("Copied!") : uiText("Click to copy")}>
+            {copied ? uiText("Copied!") : activity.txid}
           </Text>
         ) : (
           <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.400" fontStyle="italic">{uiText("no txid")}</Text>
@@ -668,7 +663,7 @@ export function ActivityTableRow({ activity, onSelect, nativePrices }: { activit
     ? `${activity.amount ? `${activity.amount} ${activity.asset || activity.chain}` : ''}${activity.amount || activity.outAmount ? ' → ' : ''}${activity.outAmount ? `${activity.swapStatus === 'completed' ? '' : '~'}${activity.outAmount} ${activity.outAsset || ''}` : activity.outAsset || '?'}`
     : nativeAmount || nativeFee
       ? `${nativeAmount ? `${nativeAmount.amount} ${activity.asset || chainSymbol}${nativeAmount.usd ? ` (${nativeAmount.usd})` : ''}` : ''}${nativeAmount && nativeFee ? '  ' : ''}${nativeFee ? uiText("fee: {{amount}}", { amount: `${nativeFee.amount} ${chainSymbol}${nativeFee.usd ? ` (${nativeFee.usd})` : ''}` }) : ''}`
-      : (activity.txid ? truncateTxid(activity.txid) : null)
+      : (activity.txid ? activity.txid : null)
 
   return (
     <Flex
@@ -699,9 +694,9 @@ export function ActivityTableRow({ activity, onSelect, nativePrices }: { activit
           <ConfBadge confirmations={activity.confirmations} chain={chainSymbol} />
         )}
       </Box>
-      <Text fontSize="2xs" color="whiteAlpha.300" flexShrink={0} w="50px" textAlign="right">{timeAgo(activity.createdAt)}</Text>
+      <Text fontSize="2xs" color="whiteAlpha.300" flexShrink={0} minW="50px" whiteSpace="nowrap" textAlign="right">{timeAgo(activity.createdAt)}</Text>
       {explorerUrl ? (
-        <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: 'var(--teal)' }} flexShrink={0} w="50px" textAlign="right"
+        <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: 'var(--teal)' }} flexShrink={0} minW="50px" whiteSpace="nowrap" textAlign="right"
           onClick={e => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }).catch(() => {}) }}>{uiText("Explorer")}</Text>
       ) : (
         <Box w="50px" flexShrink={0} />
@@ -769,8 +764,8 @@ export function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: P
         </VStack>
       </Flex>
       <Flex justify="space-between" align="center" gap="2" mt="1.5">
-        <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(swap.txid) }} title={copied ? uiText("Copied!") : uiText("Click to copy")}>
-          {copied ? uiText("Copied!") : truncateTxid(swap.txid)}
+        <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" wordBreak="break-all" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(swap.txid) }} title={copied ? uiText("Copied!") : uiText("Click to copy")}>
+          {copied ? uiText("Copied!") : swap.txid}
         </Text>
         <HStack gap="2" flexShrink={0}>
           {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>{uiText("Explorer")}</Text>}

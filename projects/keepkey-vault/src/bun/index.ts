@@ -33,8 +33,7 @@ import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
 import { validateContactOnNetwork } from '../shared/address-validation'
 import { isEnsName } from '../shared/ens'
-import { resolveEnsContact, repairLegacyEnsContacts } from './addressbook-ens'
-import { resolveStoredEnsContact } from './db'
+import { resolveEnsContact } from './addressbook-ens'
 import { previewCertificationEntries, selectCertificationContacts } from './addressbook-clearsign'
 import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
@@ -320,7 +319,7 @@ import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
 import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
 import { createFilePendingStore } from "./monero-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata, btcAccountPath, zcashTransparentReceivePath } from "../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata, btcAccountPath, zcashTransparentReceivePath, ownUtxoLabel } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
@@ -403,7 +402,7 @@ import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutCallerErc7730 } from '../shared/erc7730-support'
 import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
 import { SigningReviewSessions } from "./signing-review-session"
-import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, ALL_CHAIN_CONTACT_CAPABILITY, buildCertificationRequest, contactProofAllowed, buildContactProof, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
+import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, ALL_CHAIN_CONTACT_CAPABILITY, buildCertificationRequest, certificateForDevice, contactProofAllowed, buildContactProof, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
@@ -1426,7 +1425,8 @@ async function requestSigningApprovalDecision(id: string, signal?: AbortSignal) 
 }
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
-let walletConnectEnabled = true
+// WalletConnect is always on (old DBs may still hold walletconnect_enabled='0'; ignored)
+const walletConnectEnabled = true
 let moneroEnabled = false
 /** Own node is preferred. Existing explicit remote URLs are preserved. */
 const MONERO_DEFAULT_NODE = MONERO_LOCAL_URL
@@ -1521,7 +1521,7 @@ let privateModeEnabled = false
 function storedAddressBookCertification(): AddressBookCertification | undefined {
 	const raw = getSetting('addressbook_clearsign_certification')
 	if (!raw) return undefined
-	try { return JSON.parse(raw) as AddressBookCertification } catch { return undefined }
+	try { return certificateForDevice(JSON.parse(raw) as AddressBookCertification, engine.getDeviceState().deviceId) } catch { return undefined }
 }
 
 engine.contactProofState = () => ({ enabled: addressBookClearsignEnabled, certificate: storedAddressBookCertification() })
@@ -1542,7 +1542,6 @@ function loadSettings() {
 	moneroEnabled = getSetting('monero_enabled') === '1' && isMoneroSidecarAvailable()
 	setMoneroEmulatorEnabled(moneroEnabled)
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
-	walletConnectEnabled = getSetting('walletconnect_enabled') !== '0'
 	const storedZcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	const zcashSidecarAvailable = !!findZcashCliBinary()
 	zcashPrivacyEnabled = storedZcashPrivacyEnabled && zcashSidecarAvailable
@@ -1954,7 +1953,8 @@ function getAppSettings() {
 		// or disabled view must not hydrate or disclose wallet monitoring records.
 		moneroPendingBroadcasts: moneroEnabled && !moneroHiddenWallet(engine) ? getMoneroWallet().pendingCount() : 0,
 		passwordManagerEnabled: passwordBank.enabled,
-		passkeysEnabled: getSetting('passkeys_enabled') === '1',
+		// Windows hides FIDO HID devices from apps, so the tab could never find the KeepKey
+		passkeysEnabled: process.platform !== 'win32' && getSetting('passkeys_enabled') === '1',
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -2723,7 +2723,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 	// throwing here would bounce flows that merely render the page (#310).
 	const fwVersion = engine.getDeviceState().firmwareVersion
 	if (!isChainSupported(chain, fwVersion)
-		|| ((chain.id === 'zcash' || chain.id === 'zcash-shielded') && !zcashPrivacyEnabled)
+		|| (chain.id === 'zcash-shielded' && !zcashPrivacyEnabled)
 		|| (chain.id === 'hive' && !hiveEnabled)
 		|| !networkOn(chain.id)) {
 		console.warn(`[getBalance] ${chain.id}: unsupported on firmware ${fwVersion || '?'}, feature-flagged off or turned off — returning empty balance`)
@@ -3355,7 +3355,7 @@ function isWalletWatchChainEnabled(chainId: string): boolean {
 	return !!chain && !chain.hidden && chain.chainFamily !== 'zcash-shielded'
 		&& networkOn(chainId) && isChainSupported(chain, state.firmwareVersion)
 		&& (!isBitcoinOnlyVariant(state.firmwareVariant) || chainId === 'bitcoin')
-		&& (!(chainId === 'zcash') || zcashPrivacyEnabled) && (chainId !== 'hive' || hiveEnabled)
+		&& (chainId !== 'hive' || hiveEnabled)
 		&& !(chainId === 'bitcoin' && getBtcBackend().kind !== 'pioneer')
 }
 
@@ -4454,23 +4454,6 @@ async function verifyKnownEvmVaultTransfer(params: any) {
 }
 function vaultCertificationEntries() {
 	return certifiableAddressBookEntries(vaultAddressEntries(), getAddressBookList({ kind: 'external', savedOnly: true }), allChainContactsSupported())
-}
-const repairEnsContactsOnce = singleFlight<void>()
-async function repairSavedEnsContacts(): Promise<void> {
-	if (offlineMode) return
-	return repairEnsContactsOnce('addressbook-ens', async () => {
-		const changed = await repairLegacyEnsContacts(getAddressBookList({ kind: 'external', savedOnly: true }),
-			(name, network) => withTimeout(resolveEnsContact(name, network), 10000, 'ENS lookup'),
-			(entry, resolved) => {
-				const chains = getAllChains().filter(c => c.networkId === entry.networkId)
-				if (!validateContactOnNetwork(resolved.address, chains, matchAddressBook(entry.networkId, resolved.address, 'evm')).valid) return false
-				return resolveStoredEnsContact(entry, resolved)
-			})
-		if (changed) {
-			invalidateAddressBookCertification()
-			try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
-		}
-	})
 }
 async function listRegisteredVaults() {
 	const epoch = activitySessionEpoch
@@ -6649,14 +6632,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Filter chains by firmware version — don't derive addresses for unsupported chains
-				// Zcash (transparent + shielded) gated behind feature flag
+				// Zcash shielded gated behind the privacy capability; transparent on any firmware
 				const fwVersion = engine.getDeviceState().firmwareVersion
 				const dgbTaprootEnabled = supportsDgbTaproot(process.env.FEATURE_TAPROOT_DGB === 'true', fwVersion)
 				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
 				if (bitcoinOnly) swapDestCaips = []
 				const allChains = bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
-					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					if (c.id === 'zcash-shielded' && !zcashPrivacyEnabled) return false
 					if (c.id === 'hive' && !hiveEnabled) return false
 					if (!networkOn(c.id)) return false
 					return true
@@ -6846,7 +6829,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const isXpub = ch.chainFamily === 'utxo'
 							own.push({
 								address: p.pubkey, networkId: p.networkId, chainId: p.chainId, chainFamily: ch.chainFamily,
-								symbol: p.symbol, label: isXpub ? `${p.symbol} (xpub)` : `My ${p.symbol}`,
+								symbol: p.symbol, label: isXpub ? ownUtxoLabel(p.symbol, p.chainId, p.scriptType) : `My ${p.symbol}`,
+								...(isXpub ? { scriptType: p.scriptType, replacesLabel: `${p.symbol} (xpub)` } : {}),
 							})
 						}
 						const insertedOwn = syncOwnAddressBook(abScope, own)
@@ -9080,6 +9064,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			setPasskeysEnabled: async (params) => {
 				if (typeof params?.enabled !== 'boolean') throw new Error('enabled must be a boolean')
+				if (params.enabled && process.platform === 'win32') throw new Error('Passkeys are not available on Windows')
 				setSetting('passkeys_enabled', params.enabled ? '1' : '0')
 				return getAppSettings()
 			},
@@ -9136,15 +9121,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			passwordBankLock: async () => { passwordBank.lock(); return passwordBank.view() },
 			passwordBankGenerate: async (params) => passwordBank.generate(params.count, params.ttlMinutes),
 			passwordBankAssign: async (params) => passwordBank.assign(params.origin, params.account, params.reviewDays),
-			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.pending === true, params.ttlMinutes),
-			passwordBankReveal: async (params) => passwordBank.reveal(params.id, params.pending === true),
+			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.ttlMinutes),
+			passwordBankReveal: async (params) => passwordBank.reveal(params.id),
 			passwordBankCopy: async (params) => {
-				const { password } = passwordBank.reveal(params.id, params.pending === true)
+				const { password } = passwordBank.reveal(params.id)
 				Utils.clipboardWriteText(password)
 				if (Utils.clipboardReadText() !== password) throw new Error('Clipboard unavailable')
 			},
-			passwordBankRotate: async (params) => passwordBank.rotate(params.id, params.action, params.confirmed === true),
+			passwordBankChange: async (params) => passwordBank.change(params.id),
 			passwordBankImport: async (params) => passwordBank.unlock(false, params.json),
+			passwordBankSaveBackup: async () => {
+				const json = passwordBank.backup()
+				const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+				const filePath = path.join(os.homedir(), 'Downloads', `keepkey-password-bank-${stamp}.json`)
+				fs.writeFileSync(filePath, json, { mode: 0o600, flag: 'wx' })
+				return { filePath }
+			},
 			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
 			// never shows again (also set when the OOB passphrase card is completed).
 			markPassphraseIntroShown: async () => {
@@ -9316,15 +9308,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 notifyVaultsChanged() // Safe/Vault lists show or hide with the toggle
                 return getAppSettings()
             },
-            setWalletConnectEnabled: async (params) => {
-				if (params.enabled && isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) {
-					throw new Error('WalletConnect is not available on bitcoin-only firmware')
-				}
-				walletConnectEnabled = params.enabled
-				setSetting('walletconnect_enabled', params.enabled ? '1' : '0')
-				console.log('[settings] WalletConnect enabled:', params.enabled)
-				return getAppSettings()
-			},
 			setEmulatorEnabled: async (params) => {
 				// Refuse to enable on platforms with no emulator support. The
 				// emulator runs on macOS (Keychain) and Windows (DPAPI); Linux
@@ -9490,7 +9473,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (t) e.address = t
 					}
 				}
-				if (!bitcoinOnly) void repairSavedEnsContacts().catch(error => console.warn('[addressbook] legacy ENS repair failed:', error))
 				const external = getAddressBookList({ kind: 'external', networkId, search, savedOnly: true, chainId: bitcoinOnly ? 'bitcoin' : undefined })
 				// Vault rows only with Multisig on, and never at the cost of the contact list.
 				const vaultRows = multisigFeature.enabled && getDb()
@@ -9570,7 +9552,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				)
 			},
 			previewAddressBookCertification: async () => {
-				await repairSavedEnsContacts()
 				return previewCertificationEntries(vaultCertificationEntries(), allChainContactsSupported())
 			},
 			certifyAddressBook: async (params) => {
@@ -9603,7 +9584,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (publicKey.length !== 66 || signature.length !== 128) throw new Error('Device returned an invalid address-book attestation')
 				const certification: AddressBookCertification = {
 					version: 1, revision, contacts, root: built.root.toString('hex'),
-					publicKey, signature, certifiedAt: Date.now(),
+					publicKey, signature, certifiedAt: Date.now(), deviceId: engine.getDeviceState().deviceId || undefined,
 				}
 				setSetting('addressbook_clearsign_certification', JSON.stringify(certification))
 				setSetting('addressbook_clearsign_revision', String(revision))
@@ -10806,7 +10787,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (!isChainSupported(c, fwVersion)) return false
 					// Monero balances come from the watch-only sidecar, not an address audit.
 					if (c.chainFamily === 'monero') return false
-					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					if (c.id === 'zcash-shielded' && !zcashPrivacyEnabled) return false
 					if (c.id === 'hive' && !hiveEnabled) return false
 					return true
 				})

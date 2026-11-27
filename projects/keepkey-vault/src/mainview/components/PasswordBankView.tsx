@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Box, Button, Flex, Input, Text } from '@chakra-ui/react'
-import { PASSWORD_CACHE_MAX_MINUTES, PASSWORD_ROTATION_GUIDES, type PasswordBankView as BankView } from '../../shared/password-bank'
+import { PASSWORD_CACHE_MAX_MINUTES, type PasswordBankView as BankView } from '../../shared/password-bank'
 import { orderedPasswordProfiles } from '../../shared/password-inventory'
 import { onRpcMessage, rpcRequest } from '../lib/rpc'
 import { useUiTranslation } from '../i18n/ui'
 import { PasswordValue } from './PasswordValue'
+import { getDateLocale } from '../lib/date-locale'
 
 type Profile = BankView['profiles'][number]
 export function PasswordBankView() {
@@ -13,12 +14,12 @@ export function PasswordBankView() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
+  const [savedTo, setSavedTo] = useState('')
   const [adding, setAdding] = useState(false)
   const [details, setDetails] = useState(false)
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<string | null>(null)
   const [origin, setOrigin] = useState('')
   const [account, setAccount] = useState('')
-  const [verified, setVerified] = useState<Record<string, boolean>>({})
   const mounted = useRef(true)
   const revision = useRef(0)
   const refresh = useCallback(async () => {
@@ -32,10 +33,9 @@ export function PasswordBankView() {
     const invalidate = () => {
       setBank(null)
       setAdding(false)
-      setExpanded(null)
+      setConfirming(null)
       setOrigin('')
       setAccount('')
-      setVerified({})
       setError('')
       void refresh().catch(() => {})
     }
@@ -63,40 +63,26 @@ export function PasswordBankView() {
       await deviceCall('passwordBankGenerate', { count: 1, ttlMinutes: PASSWORD_CACHE_MAX_MINUTES })
     }
   }
-  const ensureCached = async (p: Profile, pending: boolean) => {
+  const ensureCached = async (p: Profile) => {
     const status = await rpcRequest<BankView>('passwordBankStatus')
     const current = status.profiles.find(profile => profile.id === p.id)
     if (!current) throw new Error(uiText('Unlock with KeepKey'))
-    if (((pending ? current.pendingCachedUntil : current.cachedUntil) || 0) <= Date.now()) {
-      await deviceCall('passwordBankRehydrate', { id: p.id, pending, ttlMinutes: PASSWORD_CACHE_MAX_MINUTES })
+    if ((current.cachedUntil || 0) <= Date.now()) {
+      await deviceCall('passwordBankRehydrate', { id: p.id, ttlMinutes: PASSWORD_CACHE_MAX_MINUTES })
     }
-  }
-  const prepare = async (p: Profile) => {
-    if (p.pendingSlot === undefined) {
-      await ready(true)
-      await rpcRequest('passwordBankRotate', { id: p.id, action: 'prepare' })
-    }
-    setExpanded(p.id)
   }
   const add = () => run(async () => {
     if (!bank?.unlocked) await deviceCall('passwordBankUnlock', { create: !bank?.exists })
     await ready()
-    const assigned = await rpcRequest<BankView>('passwordBankAssign', { origin, account, reviewDays: 90 })
-    const profile = assigned.profiles.find(p => !bank?.profiles.some(old => old.id === p.id))
+    await rpcRequest<BankView>('passwordBankAssign', { origin, account, reviewDays: 90 })
     setAdding(false); setOrigin(''); setAccount('')
-    if (profile) await prepare(profile)
   })
-  const begin = (p: Profile) => run(async () => {
-    await ensureCached(p, true)
-    await rpcRequest('passwordBankRotate', { id: p.id, action: 'submitted' })
-    const guide = PASSWORD_ROTATION_GUIDES.find(g => g.loginOrigin === p.origin)
-    await rpcRequest('openExternal', { url: guide?.settingsUrl || p.origin })
+  const change = (p: Profile) => run(async () => {
+    await ready(true)
+    await rpcRequest('passwordBankChange', { id: p.id })
+    setConfirming(null)
   })
-  const finish = (p: Profile) => run(async () => {
-    await rpcRequest('passwordBankRotate', { id: p.id, action: 'verify', confirmed: verified[p.id] === true })
-    setVerified(v => ({ ...v, [p.id]: false }))
-    setExpanded(null)
-  })
+  const day = (ms: number) => new Date(ms).toLocaleDateString(getDateLocale())
   const importBackup = (file?: File) => {
     if (!file) return
     void run(async () => {
@@ -122,7 +108,7 @@ export function PasswordBankView() {
         <Flex direction="column" gap="3">
           <Input aria-label={uiText('Website')} placeholder={uiText('Login domain, for example accounts.google.com')} value={origin} onChange={e => setOrigin(e.target.value)} disabled={busy} required />
           <Input aria-label={uiText('Account name')} placeholder={uiText('Account name or email')} value={account} onChange={e => setAccount(e.target.value)} disabled={busy} required />
-          <Text fontSize="sm" color="kk.textSecondary">{uiText('Create a password with KeepKey, then set it on the website.')}</Text>
+          <Text fontSize="sm" color="kk.textSecondary">{uiText('KeepKey creates the password. Use it when you sign up or change it on the website.')}</Text>
           <Flex gap="2"><Button type="submit" disabled={busy || !origin.trim() || !account.trim()}>{uiText('Create password')}</Button><Button variant="ghost" color="kk.textSecondary" disabled={busy} onClick={() => setAdding(false)}>{uiText('Cancel')}</Button></Flex>
         </Flex>
       </form>
@@ -134,32 +120,22 @@ export function PasswordBankView() {
     {bank?.unlocked && <>
       {!bank.profiles.length && !adding && <Box {...card}><Text color="kk.textSecondary">{uiText('No saved passwords yet.')}</Text></Box>}
       <Flex direction="column" gap="3">
-        {orderedPasswordProfiles(bank.profiles).map(p => {
-          const pending = p.pendingSlot !== undefined
-          const pendingAccess = p.rotationState === 'submitted'
-          const open = expanded === p.id
-          return <Box {...card} key={p.id}>
-            <Flex justify="space-between" align="center" gap="3" wrap="wrap">
-              <Box minW="0" flex="1"><Text fontWeight="600" overflowWrap="anywhere">{p.account}</Text><Text fontSize="sm" color="kk.textSecondary" overflowWrap="anywhere">{new URL(p.origin).hostname}</Text><Text fontSize="xs" color={pending || !p.changedAt ? 'kk.gold' : 'kk.textMuted'}>{pending ? uiText('Finish password change') : p.changedAt ? uiText('Ready') : uiText('Needs setup')}</Text></Box>
-              <Flex gap="2" wrap="wrap">
-                <Button size="sm" variant="ghost" color="kk.textSecondary" disabled={busy} aria-expanded={open} onClick={() => pending ? setExpanded(open ? null : p.id) : void run(() => prepare(p))}>{pending ? uiText('Continue') : p.changedAt ? uiText('Change password') : uiText('Set up')}</Button>
-              </Flex>
-            </Flex>
-            {(pending ? pendingAccess : !!p.changedAt) && <PasswordValue key={`${p.id}:${pending ? p.pendingSlot : p.slot}`} id={p.id} pending={pending} disabled={busy} beforeReveal={() => ensureCached(p, pending)} />}
-            {open && pending && <Box mt="4" pt="4" borderTop="1px solid" borderColor="kk.border">
-              {p.rotationState === 'prepared' ? <>
-                <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText('Open the website to change your password.')}</Text>
-                <Button size="sm" disabled={busy} onClick={() => void begin(p)}>{uiText('Open website')}</Button>
-                <Button ml="2" size="sm" variant="ghost" color="kk.textSecondary" disabled={busy} onClick={() => void run(async () => { await rpcRequest('passwordBankRotate', { id: p.id, action: 'cancel' }); setExpanded(null) })}>{uiText('Cancel change')}</Button>
-              </> : <>
-                <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText('Copy and paste the new password on the website, then test a fresh sign-in.')}</Text>
-                <Box mt="4"><label><input type="checkbox" disabled={!pendingAccess} checked={verified[p.id] || false} onChange={e => setVerified(v => ({ ...v, [p.id]: e.target.checked }))} /> {uiText('I successfully signed in with the new password')}</label></Box>
-                <Button mt="3" size="sm" disabled={busy || !pendingAccess || !verified[p.id]} onClick={() => void finish(p)}>{uiText('Finish')}</Button>
-                <Text fontSize="xs" mt="3" color="kk.textMuted">{uiText('Not sure it worked? Leave this open. Both passwords are kept until you verify.')}</Text>
-              </>}
-            </Box>}
-          </Box>
-        })}
+        {orderedPasswordProfiles(bank.profiles).map(p => <Box {...card} key={p.id}>
+          <Flex justify="space-between" align="center" gap="3" wrap="wrap">
+            <Box minW="0" flex="1">
+              <Text fontWeight="600" overflowWrap="anywhere">{p.account}</Text>
+              <Text fontSize="sm" color="kk.textSecondary" overflowWrap="anywhere">{new URL(p.origin).hostname}</Text>
+              <Text fontSize="xs" color="kk.textMuted">{uiText('Created {{date}}', { date: day(p.createdAt) })}{p.changedAt ? ` · ${uiText('Changed {{date}}', { date: day(p.changedAt) })}` : ''}</Text>
+            </Box>
+            <Button size="sm" variant="ghost" color="kk.textSecondary" disabled={busy} aria-expanded={confirming === p.id} onClick={() => setConfirming(confirming === p.id ? null : p.id)}>{uiText('Change password')}</Button>
+          </Flex>
+          <PasswordValue key={`${p.id}:${p.slot}`} id={p.id} disabled={busy} beforeReveal={() => ensureCached(p)} />
+          {confirming === p.id && <Box mt="4" pt="4" borderTop="1px solid" borderColor="kk.border">
+            <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText('KeepKey creates a new password for this entry. The current one is no longer shown here, so copy it first if the website asks for it.')}</Text>
+            <Button size="sm" disabled={busy} onClick={() => void change(p)}>{uiText('Create new password')}</Button>
+            <Button ml="2" size="sm" variant="ghost" color="kk.textSecondary" disabled={busy} onClick={() => setConfirming(null)}>{uiText('Cancel')}</Button>
+          </Box>}
+        </Box>)}
       </Flex>
     </>}
     {details && <Box {...card} mt="5">
@@ -167,11 +143,13 @@ export function PasswordBankView() {
       <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText('Vault stores the encrypted password bank in its local database. Recovery requires the bank data and the same seed and wallet passphrase.')}</Text>
       <Flex gap="2" wrap="wrap">
         {bank?.unlocked && <Button size="sm" disabled={busy} onClick={() => void run(() => rpcRequest('passwordBankLock'))}>{uiText('Lock now')}</Button>}
+        {bank?.unlocked && <Button size="sm" disabled={busy} onClick={() => void run(async () => { setSavedTo((await rpcRequest<{ filePath: string }>('passwordBankSaveBackup')).filePath) })}>{uiText('Save encrypted backup')}</Button>}
         {bank?.enabled && !bank.exists && !bank.walletPending && <>
           <Box as="label" p="2" cursor="pointer">{uiText('Restore encrypted backup')}<input aria-label={uiText('Restore encrypted backup')} type="file" accept="application/json,.json" disabled={busy} style={{ display: 'none' }} onChange={e => { importBackup(e.target.files?.[0]); e.target.value = '' }} /></Box>
           <Button size="sm" disabled={busy} onClick={() => void run(() => deviceCall('passwordBankUnlock', { recoverLegacy: true }))}>{uiText('Restore previous password bank')}</Button>
         </>}
       </Flex>
+      {savedTo && <Text fontSize="sm" color="kk.textSecondary" mt="3" wordBreak="break-all">{uiText('Encrypted backup saved to {{path}}', { path: savedTo })}</Text>}
     </Box>}
   </Box>
 }

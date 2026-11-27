@@ -31,6 +31,7 @@
 	"unlabeled": "Sem rótulo",
 	"ownWallet": "Minha carteira",
 	"ownSymbol": "Meu {{symbol}}",
+	"ownTransparent": "Meu endereço transparente {{symbol}}",
 	"edit": "Editar",
 	"delete": "Excluir",
 	"view": "Ver",

@@ -31,6 +31,7 @@
 	"unlabeled": "Sans libellé",
 	"ownWallet": "Mon portefeuille",
 	"ownSymbol": "Mon {{symbol}}",
+	"ownTransparent": "Mon adresse transparente {{symbol}}",
 	"edit": "Modifier",
 	"delete": "Supprimer",
 	"view": "Afficher",

@@ -8,7 +8,7 @@
  */
 import { describe, test, expect } from 'bun:test'
 import { Address, Cell, loadMessage, loadMessageRelaxed } from '@ton/core'
-import { assembleTonSignedBoc, buildTonTransfer, computeTonBodyHash } from '../src/bun/txbuilder/ton'
+import { assembleTonSignedBoc, buildTonTransfer, computeTonBodyHash, tonSendAmountNano } from '../src/bun/txbuilder/ton'
 
 // Raw "workchain:hex" addresses skip CRC16 validation (user-friendly base64
 // addresses embed a checksum and would break if drifted). All we need here
@@ -159,5 +159,18 @@ describe('TON build → bodyHash round-trip', () => {
     expect(transfer.info.value.coins).toBe(1_000_000_000n)
     expect(transfer.info.dest.equals(Address.parseRaw(SAFE_TO))).toBe(true)
     expect(transfer.info.bounce).toBe(false)
+  })
+})
+
+describe('TON amount vs balance (audit v8 A4/B6)', () => {
+  test('MAX sends the balance less the fee reserve, more reserved when deploying', () => {
+    expect(tonSendAmountNano('0', true, '5000000000', false)).toBe('4990000000')
+    expect(tonSendAmountNano('0', true, '5000000000', true)).toBe('4980000000')
+    expect(() => tonSendAmountNano('0', true, '10000000', false)).toThrow(/gas fees/)
+  })
+  test('an overspend is refused before building, never left to burn a fee', () => {
+    expect(tonSendAmountNano('4.99', false, '5000000000', false)).toBe('4990000000')
+    expect(() => tonSendAmountNano('4.991', false, '5000000000', false)).toThrow(/Insufficient funds/)
+    expect(() => tonSendAmountNano('4.99', false, '5000000000', true)).toThrow(/Insufficient funds/)
   })
 })

@@ -28,7 +28,7 @@ async function assigned(f = fixture()) {
   return { ...f, id: state.profiles[0].id }
 }
 
-function legacyPasswordBackup() {
+function legacyPasswordBackup(rotationState: 'prepared' | 'submitted' = 'prepared') {
   const bankId = '0123456789abcdef0123456789abcdef'
   const id = 'legacy-profile'
   const raw = createHmac('sha256', 'test seed')
@@ -42,7 +42,7 @@ function legacyPasswordBackup() {
   const plaintext = JSON.stringify({
     version: 1, bankId, algorithm: 'keepkey-ckv-base64url-v1',
     revision: 12, backedUpRevision: 12, nextSlot: 3, ready: [2],
-    profiles: [{ id, origin: 'https://example.org', account: 'legacy', slot: 0, pendingSlot: 1, rotationState: 'prepared', reviewDays: 90, createdAt: 1_000_000 }],
+    profiles: [{ id, origin: 'https://example.org', account: 'legacy', slot: 0, pendingSlot: 1, rotationState, reviewDays: 90, createdAt: 1_000_000 }],
   })
   const ciphertext = Buffer.concat([new Uint8Array(cipher.update(plaintext)), new Uint8Array(cipher.final())])
   const v1Backup = JSON.stringify({ format: 'keepkey-password-bank', version: 1, bankId, iv: iv.toString('base64'), ciphertext: ciphertext.toString('base64'), tag: cipher.getAuthTag().toString('base64') })
@@ -50,7 +50,7 @@ function legacyPasswordBackup() {
 }
 
 describe('password bank release gates', () => {
-  test('43 staged and verified profiles reopen from the encrypted database using 86 lifetime slots', async () => {
+  test('43 created and changed profiles reopen from the encrypted database using 86 lifetime slots', async () => {
     const { bank, db, deps } = fixture()
     bank.setEnabled(true)
     await bank.unlock(true)
@@ -60,9 +60,7 @@ describe('password bank release gates', () => {
       const account = `pilot-${i}@example.com`
       const profile = bank.assign('https://login.example.com', account, 90).profiles.find(entry => entry.account === account)!
       profileIds.push(profile.id)
-      bank.rotate(profile.id, 'prepare', false)
-      bank.rotate(profile.id, 'submitted', false)
-      bank.rotate(profile.id, 'verify', true)
+      bank.change(profile.id)
     }
     const stored = db.get(PASSWORD_BANK_SETTING)!
     bank.lock()
@@ -124,7 +122,7 @@ describe('password bank release gates', () => {
     expect(lookups).toBe(1)
     expect(restored.bankId).toBe(preview.view().bankId)
     expect(restored.profiles.map(p => p.id)).toEqual([profile.id])
-    await scoped.rehydrate(profile.id, false, 5)
+    await scoped.rehydrate(profile.id, 5)
     expect(scoped.reveal(profile.id).password).toBe(password)
     expect([...f.db.keys()].every(key => !key.includes(previousScope))).toBe(true)
   })
@@ -189,6 +187,7 @@ describe('password bank release gates', () => {
     expect(f.calls()).toBe(0)
     finishPin(true)
     expect((await unlocking).unlocked).toBe(true)
+    // A new bank asks the device for its id, then for the unlock key.
     expect(f.calls()).toBe(1)
   })
 
@@ -217,17 +216,17 @@ describe('password bank release gates', () => {
     await bank.unlock(false, v1Backup)
     expect(JSON.parse(db.get(PASSWORD_BANK_SETTING)!).version).toBe(1)
 
-    await bank.rehydrate(id, false, 5)
-    await bank.rehydrate(id, true, 5)
+    // The backup's unused staged replacement (slot 1) is settled away on open.
+    expect(bank.view().profiles[0]).toMatchObject({ slot: 0, rotationState: 'active' })
+    expect(bank.view().profiles[0].pendingSlot).toBeUndefined()
+    await bank.rehydrate(id, 5)
     await bank.generate(1, 5)
     const legacyReady = bank.assign('https://example.org', 'legacy ready', 90).profiles[1]
     const generated = bank.assign('https://example.org', 'new', 90).profiles[2]
     expect(legacyReady.slot).toBe(2)
     expect(generated.slot).toBe(3)
-    await bank.rehydrate(legacyReady.id, false, 5)
+    await bank.rehydrate(legacyReady.id, 5)
     expect(bank.reveal(id).password).toBe('bvAL4r1L1LIeH5ng_5yzu6GZ')
-    bank.rotate(id, 'submitted', false)
-    expect(bank.reveal(id, true).password).toBe('raPeMGFpZtHfOu-dJxTKR1B0')
     expect(bank.reveal(legacyReady.id).password).toBe('2RhYI69aOsTHPKsSnpqUcBC7')
     const password = bank.reveal(generated.id).password
     expect(password).toBe('IwYRPTifAKKsZj&nTtmb3oPt')
@@ -245,12 +244,10 @@ describe('password bank release gates', () => {
     restored.setEnabled(true)
     await expect(restored.unlock(false, JSON.stringify({ ...envelope, version: 1 }))).rejects.toThrow('could not be verified')
     await restored.unlock(false, stored)
-    await restored.rehydrate(id, false, 5)
-    await restored.rehydrate(id, true, 5)
-    await restored.rehydrate(legacyReady.id, false, 5)
-    await restored.rehydrate(generated.id, false, 5)
+    await restored.rehydrate(id, 5)
+    await restored.rehydrate(legacyReady.id, 5)
+    await restored.rehydrate(generated.id, 5)
     expect(restored.reveal(id).password).toBe('bvAL4r1L1LIeH5ng_5yzu6GZ')
-    expect(restored.reveal(id, true).password).toBe('raPeMGFpZtHfOu-dJxTKR1B0')
     expect(restored.reveal(legacyReady.id).password).toBe('2RhYI69aOsTHPKsSnpqUcBC7')
     expect(restored.reveal(generated.id).password).toBe(password)
   })
@@ -258,21 +255,26 @@ describe('password bank release gates', () => {
     const { bank } = fixture()
     const { id, json } = legacyPasswordBackup()
     bank.setEnabled(true)
-    await bank.unlock(false, json)
-    const previous = bank.rotate(id, 'cancel', false)
+    const previous = await bank.unlock(false, json)
 
     expect(previous.readySlots).toEqual([{ slot: 2, symbolFormat: false, cachedUntil: undefined }])
-    expect(() => bank.rotate(id, 'prepare', false)).toThrow('Generate a new ready password first')
+    expect(() => bank.change(id)).toThrow('Generate a new ready password first')
     expect(bank.view().revision).toBe(previous.revision)
 
     const generated = await bank.generate(1, 5)
     expect(generated.readySlots.map(({ slot, symbolFormat }) => [slot, symbolFormat])).toEqual([[2, false], [3, true]])
-    const prepared = bank.rotate(id, 'prepare', false)
-    expect(prepared.profiles[0].pendingSlot).toBe(3)
-    expect(prepared.readySlots).toEqual(previous.readySlots)
-
-    bank.rotate(id, 'submitted', false)
-    expect(bank.reveal(id, true).password).toBe('IwYRPTifAKKsZj&nTtmb3oPt')
+    const changed = bank.change(id)
+    expect(changed.profiles[0].slot).toBe(3)
+    expect(changed.readySlots).toEqual(previous.readySlots)
+    expect(bank.reveal(id).password).toBe('IwYRPTifAKKsZj&nTtmb3oPt')
+  })
+  test('an entry left mid-change by the retired flow opens settled', async () => {
+    const submitted = fixture(), legacy = legacyPasswordBackup('submitted')
+    submitted.bank.setEnabled(true)
+    // A submitted replacement may already be on the website, so it is kept.
+    expect((await submitted.bank.unlock(false, legacy.json)).profiles[0]).toMatchObject({ slot: 1, rotationState: 'active', changedAt: 1_000_000 })
+    await submitted.bank.rehydrate(legacy.id, 5)
+    expect(submitted.bank.reveal(legacy.id).password).toBe('raPeMGFpZtHfOu-dJxTKR1B0')
   })
   test('defaults off and every secret operation fails without contacting hardware', async () => {
     const f = fixture()
@@ -280,7 +282,7 @@ describe('password bank release gates', () => {
     await expect(f.bank.unlock(true)).rejects.toThrow('disabled')
     await expect(f.bank.generate(1, 5)).rejects.toThrow('disabled')
     expect(() => f.bank.reveal('x')).toThrow('disabled')
-    expect(() => f.bank.rotate('x', 'submitted', false)).toThrow('disabled')
+    expect(() => f.bank.change('x')).toThrow('disabled')
     expect(f.calls()).toBe(0)
     expect(f.db.has(PASSWORD_BANK_SETTING)).toBe(false)
   })
@@ -312,8 +314,43 @@ describe('password bank release gates', () => {
     const restored = await replacement.bank.unlock(false, stored)
     expect(restored.profiles[0].account).toBe('person@example.com')
     expect(restored.profiles[0].cachedUntil).toBeUndefined()
-    await replacement.bank.rehydrate(f.id, false, 5)
+    await replacement.bank.rehydrate(f.id, 5)
     expect(replacement.bank.reveal(f.id).password).toBe(password)
+  })
+  test('a new bank on the same seed gets the same id on any KeepKey, so the seed alone rebuilds its passwords', async () => {
+    const scoped = (deviceId: string, seedName: string) => {
+      const f = fixture(); f.seed(seedName)
+      const selector = createHmac('sha256', seedName).update('selector').digest('hex')
+      const bank = new PasswordBank({ ...f.deps, walletScope: () => `${deviceId}:${selector}` })
+      bank.setEnabled(true)
+      return bank
+    }
+    const first = scoped('device-a', 'test seed')
+    await first.unlock(true); await first.generate(1, 5)
+    const id = first.assign('accounts.google.com', 'person@example.com', 90).profiles[0].id
+    const password = first.reveal(id).password
+    const second = scoped('device-b', 'test seed')
+    const rebuilt = await second.unlock(true)
+    expect(rebuilt.bankId).toBe(first.view().bankId)
+    expect(rebuilt.bankId).toMatch(/^[a-f0-9]{32}$/)
+    await second.generate(1, 5)
+    const again = second.assign('accounts.google.com', 'person@example.com', 90).profiles[0]
+    expect(second.reveal(again.id).password).toBe(password)
+    expect((await scoped('device-a', 'other seed').unlock(true)).bankId).not.toBe(rebuilt.bankId)
+  })
+  test('a saved encrypted backup restores the bank on a fresh database', async () => {
+    const f = await assigned()
+    const password = f.bank.reveal(f.id).password
+    const file = f.bank.backup()
+    expect(file).not.toContain('person@example.com')
+    expect(JSON.parse(file).format).toBe('keepkey-password-bank')
+    const fresh = fixture(); fresh.bank.setEnabled(true)
+    const restored = await fresh.bank.unlock(false, file)
+    expect(restored.profiles.map(p => p.id)).toEqual([f.id])
+    await fresh.bank.rehydrate(f.id, 5)
+    expect(fresh.bank.reveal(f.id).password).toBe(password)
+    f.bank.lock()
+    expect(() => f.bank.backup()).toThrow()
   })
   test('wrong seed cannot open a backup and does not replace local data', async () => {
     const f = await assigned()
@@ -334,7 +371,7 @@ describe('password bank release gates', () => {
     f.advance(5 * 60000)
     expect(() => f.bank.reveal(f.id)).toThrow('expired')
     expect(f.bank.view().profiles[0].slot).toBe(0)
-    await f.bank.rehydrate(f.id, false, 5)
+    await f.bank.rehydrate(f.id, 5)
     expect(f.bank.reveal(f.id).password).toBe(old)
   })
   test('session timeout and wallet switch both lock metadata and cache', async () => {
@@ -345,37 +382,21 @@ describe('password bank release gates', () => {
     f.advance(15 * 60000)
     expect(f.bank.view().unlocked).toBe(false)
   })
-  test('rotation persists submission before revealing the replacement and requires verification', async () => {
+  test('changing a password replaces it in one step and records when', async () => {
     const f = await assigned(), old = f.bank.reveal(f.id).password
-    f.bank.rotate(f.id, 'prepare', false)
-    expect(() => f.bank.reveal(f.id, true)).toThrow('Begin the website change')
-    expect(() => f.bank.rotate(f.id, 'verify', true)).toThrow('Confirm')
-    f.bank.rotate(f.id, 'submitted', false)
-    expect(() => f.bank.rotate(f.id, 'cancel', false)).toThrow('reconciled')
-    expect(() => f.bank.rotate(f.id, 'verify', false)).toThrow('Confirm')
-    expect(f.bank.reveal(f.id).password).toBe(old)
-    const staged = f.bank.reveal(f.id, true).password
-    expect(staged).not.toBe(old)
-    f.bank.rotate(f.id, 'verify', true)
-    expect(f.bank.reveal(f.id).password).toBe(staged)
-    expect(f.bank.view().profiles[0].rotationState).toBe('active')
-  })
-
-  test('a submitted rotation reopens with both exact passwords using the database alone', async () => {
-    const f = await assigned(), old = f.bank.reveal(f.id).password
-    f.bank.rotate(f.id, 'prepare', false)
-    f.bank.rotate(f.id, 'submitted', false)
-    const pending = f.bank.reveal(f.id, true).password
+    f.advance(60000)
+    const changed = f.bank.change(f.id).profiles[0]
+    expect(changed).toMatchObject({ slot: 1, rotationState: 'active', createdAt: 1_000_000, changedAt: 1_060_000 })
+    const next = f.bank.reveal(f.id).password
+    expect(next).not.toBe(old)
     f.bank.lock()
     const restarted = new PasswordBank(f.deps)
-    expect((await restarted.unlock()).profiles[0]).toMatchObject({ rotationState: 'submitted', slot: 0, pendingSlot: 1 })
-    await restarted.rehydrate(f.id, false, 5)
-    await restarted.rehydrate(f.id, true, 5)
-    expect(restarted.reveal(f.id).password).toBe(old)
-    expect(restarted.reveal(f.id, true).password).toBe(pending)
+    await restarted.unlock()
+    await restarted.rehydrate(f.id, 5)
+    expect(restarted.reveal(f.id).password).toBe(next)
   })
 
-  test('failed database writes keep both slots and block access to an unsubmitted replacement', async () => {
+  test('a failed database write keeps the current password', async () => {
     const f = await assigned()
     let writeFails = false
     const bank = new PasswordBank({
@@ -388,40 +409,20 @@ describe('password bank release gates', () => {
       },
     })
     await bank.unlock()
-    bank.rotate(f.id, 'prepare', false)
-    await bank.rehydrate(f.id, false, 5)
-    await bank.rehydrate(f.id, true, 5)
-    const old = bank.reveal(f.id).password
-    const prepared = f.db.get(PASSWORD_BANK_SETTING)
+    await bank.generate(1, 5)
+    await bank.rehydrate(f.id, 5)
+    const old = bank.reveal(f.id).password, stored = f.db.get(PASSWORD_BANK_SETTING)
     writeFails = true
-
-    expect(() => bank.rotate(f.id, 'submitted', false)).toThrow('Database write failed')
-    expect(f.db.get(PASSWORD_BANK_SETTING)).toBe(prepared)
-    expect(bank.view().profiles[0]).toMatchObject({ rotationState: 'prepared', slot: 0, pendingSlot: 1 })
-    expect(() => bank.reveal(f.id, true)).toThrow('Begin the website change')
+    expect(() => bank.change(f.id)).toThrow('Database write failed')
+    expect(f.db.get(PASSWORD_BANK_SETTING)).toBe(stored)
+    expect(bank.view().profiles[0].slot).toBe(0)
     expect(bank.reveal(f.id).password).toBe(old)
-
-    writeFails = false
-    bank.rotate(f.id, 'submitted', false)
-    const pending = bank.reveal(f.id, true).password
-    const submitted = f.db.get(PASSWORD_BANK_SETTING)
-    writeFails = true
-    expect(() => bank.rotate(f.id, 'verify', true)).toThrow('Database write failed')
-    expect(f.db.get(PASSWORD_BANK_SETTING)).toBe(submitted)
-    expect(bank.view().profiles[0]).toMatchObject({ rotationState: 'submitted', slot: 0, pendingSlot: 1 })
-    expect(bank.reveal(f.id).password).toBe(old)
-    expect(bank.reveal(f.id, true).password).toBe(pending)
-
-    writeFails = false
-    bank.rotate(f.id, 'verify', true)
-    expect(bank.reveal(f.id).password).toBe(pending)
   })
 
-  test('new assignment and cancelling a rotation never reuse retired slots', async () => {
+  test('new entries and changes never reuse retired slots', async () => {
     const f = await assigned()
     f.bank.assign('github.com', 'other', 30)
-    f.bank.rotate(f.id, 'prepare', false)
-    f.bank.rotate(f.id, 'cancel', false)
+    f.bank.change(f.id)
     expect(f.bank.view().readySlots).toHaveLength(0)
     await f.bank.generate(1, 5)
     expect(f.bank.view().readySlots[0].slot).toBe(3)
@@ -466,8 +467,8 @@ describe('password bank release gates', () => {
   })
   test('rehydrate refuses a cache longer than the session too', async () => {
     const f = await assigned()
-    await expect(f.bank.rehydrate(f.id, false, 1440)).rejects.toThrow('1–15 minutes')
-    await f.bank.rehydrate(f.id, false, 15)
+    await expect(f.bank.rehydrate(f.id, 1440)).rejects.toThrow('1–15 minutes')
+    await f.bank.rehydrate(f.id, 15)
   })
   test('the session is not extended by caching: a password cached late still ends with the session', async () => {
     const f = fixture(); f.bank.setEnabled(true); await f.bank.unlock(true)

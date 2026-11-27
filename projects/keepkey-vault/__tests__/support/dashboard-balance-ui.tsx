@@ -21,6 +21,7 @@ let readError: Error | null = new Error(busy)
 let staleReply = false
 let holdCache = false
 let finishCache: ((value: unknown) => void) | undefined
+let extraRows: any[] = []
 const realNow = Date.now
 let clockOffset = 0
 Date.now = () => realNow() + clockOffset
@@ -29,8 +30,8 @@ mock.module('../../src/mainview/lib/rpc', () => ({
   rpcRequest: async (method: string, params: unknown) => {
     calls.push(method)
     switch (method) {
-      case 'getCachedBalances': return holdCache ? new Promise(resolve => { finishCache = resolve }) : cached ? { balances: [{ ...row, txPending: pendingCache }], updatedAt: Date.now() - 60000, staleReasons } : null
-      case 'getBalances': balanceReads.push(params); if (readError) throw readError; return [{ ...row, syncState: staleReply ? 'stale' : 'confirmed', updatedAt: staleReply ? row.updatedAt : Date.now() }]
+      case 'getCachedBalances': return holdCache ? new Promise(resolve => { finishCache = resolve }) : cached ? { balances: [{ ...row, txPending: pendingCache }, ...extraRows], updatedAt: Date.now() - 60000, staleReasons } : null
+      case 'getBalances': balanceReads.push(params); if (readError) throw readError; return [{ ...row, syncState: staleReply ? 'stale' : 'confirmed', updatedAt: staleReply ? row.updatedAt : Date.now() }, ...extraRows]
       case 'getAppSettings': return { disabledNetworks: CHAINS.filter(c => !enabledChains.includes(c.id)).map(c => c.id), passphraseIntroShown: true, zcashPrivacyEnabled: false, moneroEnabled: false, hiveEnabled: false }
       case 'getPendingSwaps': case 'getCustomChains': return []
       case 'getMarketData': return { data: [65000] }
@@ -58,6 +59,7 @@ const { createRoot } = await import('react-dom/client')
 const { ChakraProvider, defaultSystem } = await import('@chakra-ui/react')
 await import('../../src/mainview/i18n')
 const { Dashboard } = await import('../../src/mainview/components/Dashboard')
+const { dispatchVaultCommand } = await import('../../src/mainview/lib/commandBus')
 let container: HTMLDivElement
 let root: ReturnType<typeof createRoot>
 const settle = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) }) }
@@ -150,6 +152,15 @@ try {
   await refresh()
   result.manualRefreshWorks = calls.filter(method => method === 'getBalances').length > 0 && !refreshDue()
   result.manualRefreshShowsAge = container.querySelector('[data-balance-refresh-due]')?.textContent?.includes('just now') ?? false
+  await unmount()
+  // Drilled Zcash view: a degraded '0' row is unknown, never "$0.00 / No ZEC balance yet".
+  clockOffset = 0
+  enabledChains = ['bitcoin', 'zcash']
+  extraRows = [{ chainId: 'zcash', symbol: 'ZEC', balance: '0', balanceUsd: 0, address: '', tokens: [], syncState: 'degraded', updatedAt: Date.now() }]
+  await mount()
+  await act(async () => { dispatchVaultCommand({ type: 'open-chain', chainId: 'zcash' }) })
+  await settle()
+  result.drilledZcashDegraded = { zero: text().includes('No Zcash balance yet'), unknown: text().includes('Balance unavailable') }
 } finally {
   await unmount()
 }

@@ -142,7 +142,7 @@ export interface RestApiCallbacks {
   resolveChain?: (networkId: string) => import('../shared/chains').ChainDef | undefined
   onSigningRequest: (info: SigningRequestInfo, signal?: AbortSignal) => Promise<SigningApprovalDecision>
   onSigningDismissed?: (id: string) => void
-  onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
+  onPairRequest: (info: { name: string; url: string; imageUrl: string; origin: string }) => void
   /** A device policy is being applied (POST /system/apply-policies). */
   onPolicyApplied?: (policy: { policyName?: unknown; enabled?: unknown }) => void
   onPairDismissed?: () => void
@@ -195,12 +195,23 @@ export interface RestApiCallbacks {
 /** A Host header naming this machine's loopback, with an optional port (the API listens on loopback only). */
 const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i
 
-function corsHeaders(_req?: Request): Record<string, string> {
-  // Use '*' — bearer-token auth model (not cookie-based), so wildcard is safe
-  // and prevents browsers from ever sending credentials via CORS.
+/** Routes any web page may call: reachability probes and the pairing entry (the user approves each pairing). */
+const OPEN_CORS_PATHS = new Set(['/api/health', '/api/v1/health', '/api/v1/health/fast', '/info/ping', '/system/info/ping', '/auth/pair'])
+const EXTENSION_ORIGIN = /^(?:chrome-extension|moz-extension|safari-web-extension):\/\/[^/]+$/i
+
+/** CORS is granted only to browser extensions, to origins that paired, and on the open routes above.
+ * A page with no grant can still send a request but cannot read the answer (or clear the PNA preflight). */
+function buildCorsHeaders(req: Request | undefined, isPairedOrigin: (origin: string) => boolean): Record<string, string> {
+  const origin = req?.headers.get('origin')
+  const headers: Record<string, string> = { 'Vary': 'Origin' }
+  if (!origin || !req) return headers
+  const path = new URL(req.url).pathname
+  if (!EXTENSION_ORIGIN.test(origin) && !OPEN_CORS_PATHS.has(path) && !isPairedOrigin(origin)) return headers
+  // Bearer-token auth (no cookies), so credentials are never allowed.
   // Private-Network-Access headers required for https → localhost (WKWebView, Chrome 104+).
   return {
-    'Access-Control-Allow-Origin': '*',
+    ...headers,
+    'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, Access-Control-Request-Private-Network, X-KeepKey-Device-Access',
     'Access-Control-Allow-Private-Network': 'true',
@@ -1186,6 +1197,9 @@ export interface RestApiServer {
  *  there. Throws if any address is already held: Desktop never shares its port.
  *  Tests pass '127.0.0.1'. */
 export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks, hostname?: string): RestApiServer {
+  const corsHeaders = (req?: Request) => buildCorsHeaders(req, origin => auth.hasPairedOrigin(origin))
+  /** Pair prompts per origin in the last minute (a page cannot flood the user with prompts). */
+  const pairAttempts = new Map<string, number[]>()
   // Split-flow shielded sends: the sidecar's /broadcast reply carries no reliable
   // txid ("" when a node already had the tx), so the activity row takes the
   // authoritative one from the matching /finalize. The sidecar holds a single
@@ -1254,6 +1268,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       const path = url.pathname
       const method = req.method
       const requestStart = Date.now()
+      // DNS-rebinding guard: a rebound site reaches 127.0.0.1 under its own name, so its Host is never loopback.
+      if (!LOOPBACK_HOST.test(req.headers.get('host') || '')) {
+        return new Response(JSON.stringify({ error: 'Host not allowed' }), { status: 403, headers: { 'Content-Type': 'application/json' } })
+      }
       // When this request could first have reached the device (set once the
       // approval card is answered); a device Failure before that is not ours.
       let deviceWorkStart = requestStart
@@ -1319,11 +1337,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       }
 
       // Resolve app info from bearer token (or 'public')
-      const resolveAppInfo = (): { appName: string; imageUrl: string; paired: boolean } => {
+      const resolveAppInfo = (): { appName: string; imageUrl: string; paired: boolean; origin?: string } => {
         const token = auth.extractBearerToken(req)
         if (!token) return { appName: 'public', imageUrl: '', paired: false }
         const entry = auth.validate(token)
-        return { appName: entry?.info?.name || 'paired', imageUrl: entry?.info?.imageUrl || '', paired: !!entry }
+        return { appName: entry?.info?.name || 'paired', imageUrl: entry?.info?.imageUrl || '', paired: !!entry, origin: entry?.info?.origin }
       }
 
       // Request-scoped body capture (set by POST handlers before json() is called)
@@ -1354,7 +1372,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // The audit-log read endpoints don't get logged — otherwise each read
         // would persist the full prior history into a new row, recursively
         // ballooning response_body across repeated reads.
-        const skipAuditLog = path.startsWith('/api/v1/activity') || path.startsWith('/api/v1/ledger') || path === '/docs' || path === '/admin/info' || path === '/auth/pair'
+        const skipAuditLog = path.startsWith('/api/v1/activity') || path.startsWith('/api/v1/ledger') || path === '/docs' || path === '/admin/info'
         if (callbacks?.onApiLog && !skipAuditLog) {
           const { appName, imageUrl } = resolveAppInfo()
           // Audit logs are stored locally (SQLite) on the user's own machine,
@@ -1629,7 +1647,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if ((path === '/api/health' || path === '/api/v1/health') && method === 'GET') {
           const ds = engine.getDeviceState()
           const diagnostics = callbacks?.getSyncDiagnostics?.() as {balanceSync?: {status?: string}} | undefined
-          // CORS is '*', so any website can read this route. The documented public fields stay public; the sync
+          // CORS is open on this route, so any website can read it. The documented public fields stay public; the sync
           // diagnostics (which chains are syncing, timings, failures, connectivity probes) go only to a paired key
           // or to a local tool such as `curl` (audit v6 N5). A local tool is a loopback request that carries neither
           // Origin nor Sec-Fetch-Site (page scripts cannot remove them; modern browsers send one on every fetch, as
@@ -1645,7 +1663,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status: 'healthy',
             syncing: engine.isSyncing || diagnostics?.balanceSync?.status === 'running',
             apiVersion: 2,
-            supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion) && (c.id !== 'hive' || getSetting('hive_enabled') === '1') && c.chainFamily !== 'monero').map(c => c.networkId),
+            supportedChains: [...new Set(CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion) && (c.id !== 'hive' || getSetting('hive_enabled') === '1') && c.chainFamily !== 'monero').map(c => c.networkId))],
             device_connected: engine.wallet !== null,
             device_locked: engine.isLocked,
             version: callbacks?.getVersion?.() || 'unknown',
@@ -1680,6 +1698,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/admin/info' && method === 'GET') {
+          auth.requireAuth(req)
           return json({
             version: callbacks?.getVersion?.() || 'unknown',
             connected: engine.wallet !== null,
@@ -1744,15 +1763,23 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
           if (method === 'POST') {
             const body = await parseRequest(req, S.PairRequest)
-            // Notify UI about the incoming pair request
-            if (callbacks?.onPairRequest) {
-              callbacks.onPairRequest({ name: body.name, url: body.url || '', imageUrl: body.imageUrl || '' })
-            }
+            // The Origin header is what the browser says, not the body; a non-browser client can
+            // forge it, but a web page cannot. '' = no Origin (a local app such as an SDK or CLI).
+            const origin = req.headers.get('origin') || ''
+            if (reqBody && typeof reqBody === 'object') reqBody = { ...reqBody, origin }
+            const now = Date.now()
+            const recent = (pairAttempts.get(origin) || []).filter(t => now - t < 60_000)
+            if (recent.length >= 3) return json({ error: 'Too many pairing requests, try again in a minute' }, 429)
+            pairAttempts.set(origin, [...recent, now])
+            const info = { name: body.name, url: body.url || '', imageUrl: body.imageUrl || '', clientId: body.clientId, origin }
             // requestPair requires user approval via UI — NOT auto-granted.
-            // Idempotent: an already-paired identity reuses its key (reused:true)
-            // after the user re-approves, instead of minting a duplicate.
+            // Idempotent: an already-paired identity (same name AND origin) reuses its key
+            // (reused:true) after the user re-approves, instead of minting a duplicate.
+            const pending = auth.requestPair(info)
+            // Notify UI about the incoming pair request
+            callbacks?.onPairRequest?.({ name: info.name, url: info.url, imageUrl: info.imageUrl, origin })
             try {
-              const { apiKey, reused } = await auth.requestPair(body)
+              const { apiKey, reused } = await pending
               return json({ apiKey, reused })
             } finally {
               // Dismiss UI overlay + restore window level on approve, reject, or timeout
@@ -1880,9 +1907,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
           await requireWallet(engine)
 
-          const { appName, paired: appPaired } = resolveAppInfo()
+          const { appName, paired: appPaired, origin: appOrigin } = resolveAppInfo()
           const id = crypto.randomUUID()
-          const signingInfo: SigningRequestInfo = { id, method: path, appName, appPaired }
+          const signingInfo: SigningRequestInfo = { id, method: path, appName, appPaired, ...(appPaired ? { appOrigin } : {}) }
           // Device state is already cached by the engine and does not initiate
           // USB traffic. Certified metadata must be resolved before approval,
           // so establish firmware capability before building the preview.
@@ -2349,6 +2376,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         // ── List paired apps (public — shows connected dApps, keys stripped) ──
         if (path === '/auth/paired-apps' && method === 'GET') {
+          auth.requireAuth(req)
           const apps = auth.listPairedApps().map(({ apiKey: _k, ...safe }) => safe)
           return json({ apps, total: apps.length })
         }
@@ -4177,6 +4205,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // SDK-CALLED ENDPOINTS (cache, portfolio, batch pubkeys)
         // ═══════════════════════════════════════════════════════════════
         if (path === '/api/cache/status' && method === 'GET') {
+          auth.requireAuth(req)
           return json({
             available: true,
             cached_pubkeys: pubkeyCache.size,
@@ -4185,6 +4214,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/api/portfolio' && method === 'GET') {
+          auth.requireAuth(req)
           const ds = engine.getDeviceState()
           if (!ds.deviceId) return json({ devices: [], total_value_usd: 0 })
           const cached = engine.isPassphraseWallet ? null : getCachedBalances(ds.deviceId)

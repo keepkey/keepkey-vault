@@ -97,5 +97,16 @@
 	"insufficientZcashMinimumFeeExact": "{{fee}} ZEC asgari ağ ücreti için yeterli ZEC yok. Biraz daha küçük bir tutar göndermeyi deneyin.",
 	"insufficientXrpReserve": "Hesap rezervi ve ağ ücretinden sonra yeterli XRP yok.",
 	"insufficientTronMaxReserve": "Ağ ücretleri için {{reserve}} TRX ayrıldıktan sonra azami tutarı göndermek için yeterli TRX yok.",
-	"exceedsBalanceWithFee": "Tutar ile ağ ücreti ({{fee}} {{symbol}}) kullanılabilir bakiyeyi ({{balance}} {{symbol}}) aşıyor."
+	"exceedsBalanceWithFee": "Tutar ile ağ ücreti ({{fee}} {{symbol}}) kullanılabilir bakiyeyi ({{balance}} {{symbol}}) aşıyor.",
+	"qrUnsupported": "Bu QR kodu, KeepKey Desktop'ın tamamlayamadığı bir ödeme isteğidir. Hiçbir şey doldurulmadı.",
+	"qrBadAmount": "Bu QR kodundaki tutar bu varlık için geçerli değil.",
+	"qrWrongNetwork": "Bu QR kodu başka bir ağa ait.",
+	"feeOverQuarterFixed": "Ücret, gönderdiğiniz tutarın %25'inden fazla. Bu ağın ücreti sabittir; daha büyük bir tutar göndermeyi düşünün.",
+	"buildNeedsRecipient": "Bir alıcı adresi girin.",
+	"buildNeedsSelfSendConfirm": "Devam etmek için yukarıda kendi adresinize gönderimi onaylayın.",
+	"buildNeedsRiskConfirm": "Devam etmek için yukarıda alıcı uyarısını onaylayın.",
+	"buildNeedsAmount": "Bir tutar girin.",
+	"insufficientStakingFee": "Stake tutarı ve ağ ücreti için yeterli {{symbol}} yok.",
+	"insufficientRegistrationFee": "Kayıt ve ağ ücreti için yeterli {{symbol}} yok.",
+	"insufficientSolanaMaxSwap": "Solana ağ ücretini karşılamak için yeterli SOL yok."
 }

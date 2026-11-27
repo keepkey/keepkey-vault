@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { PasswordBank } from '../src/bun/password-bank'
 import { replaceEncryptedPasswordBank } from '../src/bun/password-bank-storage'
 
-test('database commit controls password release and preserves the rotation across a restart', async () => {
+test('database commit controls password release and keeps a changed password across a restart', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'keepkey-password-bank-db-'))
   const path = join(dir, 'vault.db')
   const openDb = () => {
@@ -34,17 +34,15 @@ test('database commit controls password release and preserves the rotation acros
     await bank.generate(2, 5)
     const { id } = bank.assign('https://example.org', 'disposable test account', 90).profiles[0]
     const previous = bank.reveal(id).password
-    bank.rotate(id, 'prepare', false)
 
     db.exec("CREATE TRIGGER reject_bank_write BEFORE UPDATE ON settings BEGIN SELECT RAISE(ABORT, 'test database write failure'); END")
-    expect(() => bank.rotate(id, 'submitted', false)).toThrow('test database write failure')
-    expect(bank.view().profiles[0].rotationState).toBe('prepared')
-    expect(() => bank.reveal(id, true)).toThrow()
+    expect(() => bank.change(id)).toThrow('test database write failure')
+    expect(bank.reveal(id).password).toBe(previous)
     expect(db.query('PRAGMA main.synchronous').get()).toEqual({ synchronous: 1 })
     db.exec('DROP TRIGGER reject_bank_write')
 
-    bank.rotate(id, 'submitted', false)
-    const replacement = bank.reveal(id, true).password
+    bank.change(id)
+    const replacement = bank.reveal(id).password
     expect(replacement).not.toBe(previous)
     expect(db.query('PRAGMA main.synchronous').get()).toEqual({ synchronous: 1 })
     bank.lock()
@@ -53,12 +51,7 @@ test('database commit controls password release and preserves the rotation acros
     db = openDb()
     const restored = openBank(db)
     await restored.unlock()
-    expect(restored.view().profiles[0].rotationState).toBe('submitted')
-    await restored.rehydrate(id, false, 5)
-    await restored.rehydrate(id, true, 5)
-    expect(restored.reveal(id).password).toBe(previous)
-    expect(restored.reveal(id, true).password).toBe(replacement)
-    restored.rotate(id, 'verify', true)
+    await restored.rehydrate(id, 5)
     expect(restored.reveal(id).password).toBe(replacement)
   } finally {
     db.close()

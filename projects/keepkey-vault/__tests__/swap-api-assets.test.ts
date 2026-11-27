@@ -13,8 +13,9 @@ test('indexed USDC and native chains absent from the pool shortlist resolve by C
   }
 })
 test('firmware restrictions apply even when native metadata is known', async () => {
-  const zec = CHAINS.find(c => c.id === 'zcash')!
-  expect(await resolveSwapAsset(zec.caip, { assets: [], firmwareVersion: '7.14.0' })).toBeNull()
+  // Transparent ZEC has no minFirmware (its balance shows on any firmware), so Solana carries this check.
+  const sol = CHAINS.find(c => c.id === 'solana')!
+  expect(await resolveSwapAsset(sol.caip, { assets: [], firmwareVersion: '7.13.0' })).toBeNull()
 })
 test('unknown EVM tokens require verified decimal metadata; malformed tokens never invoke lookup', async () => {
   const token = 'eip155:1/erc20:0x1111111111111111111111111111111111111111'

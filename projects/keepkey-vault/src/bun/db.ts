@@ -350,7 +350,7 @@ export function initDb() {
     }
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN device_id TEXT`) } catch { /* already exists */ }
     // Pairing identity (stable per-install id) + sliding-TTL recency
-    for (const col of ['client_id TEXT', 'last_used_on INTEGER']) {
+    for (const col of ['client_id TEXT', 'last_used_on INTEGER', 'origin TEXT']) {
       try { db.exec(`ALTER TABLE paired_apps ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN wallet_id TEXT`) } catch { /* already exists */ }
@@ -1155,12 +1155,12 @@ export function getTokensByVisibility(status: TokenVisibilityStatus): TokenVisib
 export function getStoredPairings(): PairedAppInfo[] {
   try {
     if (!db) return []
-    const rows = db.query('SELECT api_key, name, url, image_url, added_on, client_id, last_used_on FROM paired_apps').all() as Array<{
-      api_key: string; name: string; url: string; image_url: string; added_on: number; client_id: string | null; last_used_on: number | null
+    const rows = db.query('SELECT api_key, name, url, image_url, added_on, client_id, last_used_on, origin FROM paired_apps').all() as Array<{
+      api_key: string; name: string; url: string; image_url: string; added_on: number; client_id: string | null; last_used_on: number | null; origin: string | null
     }>
     return rows.map(r => ({
       apiKey: r.api_key, name: r.name, url: r.url, imageUrl: r.image_url, addedOn: r.added_on,
-      clientId: r.client_id ?? undefined, lastUsedOn: r.last_used_on ?? undefined,
+      clientId: r.client_id ?? undefined, lastUsedOn: r.last_used_on ?? undefined, origin: r.origin ?? undefined,
     }))
   } catch (e: any) {
     console.warn('[db] getStoredPairings failed:', e.message)
@@ -1168,12 +1168,12 @@ export function getStoredPairings(): PairedAppInfo[] {
   }
 }
 
-export function storePairing(apiKey: string, info: { name: string; url: string; imageUrl: string; addedOn: number; clientId?: string; lastUsedOn?: number }) {
+export function storePairing(apiKey: string, info: { name: string; url: string; imageUrl: string; addedOn: number; clientId?: string; lastUsedOn?: number; origin?: string }) {
   try {
     if (!db) return
     db.run(
-      'INSERT OR REPLACE INTO paired_apps (api_key, name, url, image_url, added_on, client_id, last_used_on) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [apiKey, info.name, info.url || '', info.imageUrl || '', info.addedOn, info.clientId ?? null, info.lastUsedOn ?? info.addedOn]
+      'INSERT OR REPLACE INTO paired_apps (api_key, name, url, image_url, added_on, client_id, last_used_on, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [apiKey, info.name, info.url || '', info.imageUrl || '', info.addedOn, info.clientId ?? null, info.lastUsedOn ?? info.addedOn, info.origin ?? null]
     )
   } catch (e: any) {
     console.warn('[db] storePairing failed:', e.message)
@@ -3091,6 +3091,8 @@ export interface OwnAddressSeed {
   derivationPath?: string
   scriptType?: string
   addressIndex?: number
+  /** An older seeded default; an entry still carrying it gets the new label. */
+  replacesLabel?: string
 }
 
 /** Idempotently mirror connected-wallet addresses as kind='own' entries (R2).
@@ -3109,6 +3111,10 @@ export function syncOwnAddressBook(
           derivation_path, script_type, address_index, created_at, updated_at)
        VALUES (?, ?, ?, 'own', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
+    const relabel = db.query(
+      `UPDATE addressbook SET label = ?, script_type = COALESCE(script_type, ?)
+       WHERE kind = 'own' AND wallet_id = ? AND network_id = ? AND address = ? AND label = ?`,
+    )
     let inserted = 0
     const tx = db.transaction(() => {
       for (const s of seeds) {
@@ -3118,6 +3124,7 @@ export function syncOwnAddressBook(
           s.label, s.derivationPath ?? null, s.scriptType ?? null, s.addressIndex ?? null, now, now,
         )
         if ((res as any)?.changes) inserted++
+        else if (s.replacesLabel) relabel.run(s.label, s.scriptType ?? null, scope.walletId, s.networkId, addr, s.replacesLabel)
       }
     })
     tx()

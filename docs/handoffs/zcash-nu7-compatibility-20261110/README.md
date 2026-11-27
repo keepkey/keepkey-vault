@@ -5,14 +5,10 @@
 PR #643 is adapted onto the current 1.7 develop implementation, preserving native
 send safety, Cosmos/XRP chain-result confirmation, gateway caching and Monero fixes.
 Zcash capability metadata now starts at firmware **7.17.0**. Nu7 transparent signing
-retains the reviewed alpha emulator and now admits the specific physical alpha
-image from firmware source `66df3e24ce5a90dac790e89cc031d3cec82e9d15` for the
-operator's live hardware testing. Its full-image SHA256 is
-`a0275ca76568ace103cbb2daa069f76b0d8d7b5005a3419548a578018eda1808`.
-The hash and linked PCZT handlers were checked against the local image and ARM
-map. This is an explicit alpha admission, not a claim of completed physical
-transaction or mined-chain qualification. Other physical builds and private-pool
-sends remain unqualified; a version string does not authorize them.
+retains the reviewed alpha emulator and admits any physical KeepKey on firmware
+>= 7.17.0 (owner decision, audit v8 S1: the earlier single-image SHA256 pin was
+removed). Other native state checks (real wallet, hid/webusb, initialized, not
+bootloader) still apply.
 Receiving and balance monitoring remain available on supported builds.
 
 The latest checked-in certified emulator pin was verified against canonical

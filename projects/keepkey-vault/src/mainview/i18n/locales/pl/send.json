@@ -97,5 +97,16 @@
 	"insufficientZcashMinimumFeeExact": "Za mało ZEC na minimalną opłatę sieciową {{fee}} ZEC. Spróbuj wysłać nieco mniejszą kwotę.",
 	"insufficientXrpReserve": "Za mało XRP po rezerwie konta i opłacie sieciowej.",
 	"insufficientTronMaxReserve": "Za mało TRX, aby wysłać maksimum po zarezerwowaniu {{reserve}} TRX na opłaty sieciowe.",
-	"exceedsBalanceWithFee": "Kwota wraz z opłatą sieciową ({{fee}} {{symbol}}) przekracza dostępne saldo ({{balance}} {{symbol}})."
+	"exceedsBalanceWithFee": "Kwota wraz z opłatą sieciową ({{fee}} {{symbol}}) przekracza dostępne saldo ({{balance}} {{symbol}}).",
+	"qrUnsupported": "Ten kod QR to żądanie płatności, którego KeepKey Desktop nie może zrealizować. Nic nie zostało wypełnione.",
+	"qrBadAmount": "Kwota w tym kodzie QR jest nieprawidłowa dla tego aktywa.",
+	"qrWrongNetwork": "Ten kod QR dotyczy innej sieci.",
+	"feeOverQuarterFixed": "Opłata przekracza 25% wysyłanej kwoty. Opłata w tej sieci jest stała, więc rozważ wysłanie większej kwoty.",
+	"buildNeedsRecipient": "Wpisz adres odbiorcy.",
+	"buildNeedsSelfSendConfirm": "Aby kontynuować, potwierdź powyżej wysyłkę na własny adres.",
+	"buildNeedsRiskConfirm": "Aby kontynuować, potwierdź powyżej ostrzeżenie dotyczące odbiorcy.",
+	"buildNeedsAmount": "Wpisz kwotę.",
+	"insufficientStakingFee": "Za mało {{symbol}} na kwotę stakingu i opłatę sieciową.",
+	"insufficientRegistrationFee": "Za mało {{symbol}} na rejestrację i opłatę sieciową.",
+	"insufficientSolanaMaxSwap": "Za mało SOL na opłatę sieciową Solana."
 }

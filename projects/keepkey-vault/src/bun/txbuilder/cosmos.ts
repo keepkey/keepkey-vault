@@ -312,7 +312,7 @@ export async function buildCosmosStakingTx(
     : toBaseUnits(params.amount, chain.decimals)
   if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
   if (feeBase + (type === 'delegate' ? baseAmount : 0n) > balance) {
-    throw new Error(`Insufficient ${chain.symbol} spendable balance for staking and transaction fee`)
+    throw new Error(balanceErrorMessage('staking', { symbol: chain.symbol }))
   }
   if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
   const chain_id = chain.chainId
@@ -419,7 +419,7 @@ export async function buildCosmosNameRegTx(
 
   const spendable = await getCosmosSpendable(chain.id, fromAddress)
   if (baseAmount + toBaseUnits(feeInDisplay, chain.decimals) > (spendable.get(chain.denom || chain.symbol.toLowerCase()) ?? 0n)) {
-    throw new Error(`Insufficient ${chain.symbol} spendable balance for registration and transaction fee`)
+    throw new Error(balanceErrorMessage('registration', { symbol: chain.symbol }))
   }
 
   // 3. Build the `~:` memo: ~:name:chain:address  (owner defaults to signer).

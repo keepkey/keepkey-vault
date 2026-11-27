@@ -54,7 +54,9 @@ const { createRoot } = await import('react-dom/client')
 const { CHAINS } = await import('../../src/shared/chains')
 const { SendForm } = await import(process.env.SEND_FORM_UNDER_TEST || '../../src/mainview/components/SendForm')
 const zcash = CHAINS.find(c => c.id === 'zcash')!, ethereum = CHAINS.find(c => c.id === 'ethereum')!
-const notice = 'Synthetic host: this signer is not qualified for Zcash.'
+// The host reason (shared constant) is rendered through its i18n key, not raw.
+const notice = 'Your KeepKey needs firmware 7.17 or later to send Zcash.'
+const shownNotice = notice
 const checking = 'Checking Zcash sending support…'
 const status = (available: boolean, sessionId = 'synthetic-session-A') => ({ available, requiredFirmware: '7.17.0', emulatorOnly: true, alphaOnly: true, sessionId, ...(!available ? { reason: notice } : {}) })
 const physicalStatus = (available: boolean, sessionId = 'physical-session-A', reason = notice) => ({ available, requiredFirmware: '7.17.0', emulatorOnly: false, alphaOnly: true, signerKind: 'physical-alpha', sessionId, ...(!available ? { reason } : {}) })
@@ -119,7 +121,7 @@ expect(button('buildTransaction').disabled).toBe(true)
 expect(text()).toContain(checking); expect(container.querySelector(`[aria-label="${checking}"]`)).not.toBeNull()
 expect(calls).toHaveLength(0)
 await resolveStatus(status(false)) // physical 7.16
-expect(button('buildTransaction').disabled).toBe(true); expect(text()).toContain(notice); expect(container.querySelector(`[aria-label="${checking}"]`)).toBeNull()
+expect(button('buildTransaction').disabled).toBe(true); expect(text()).toContain(shownNotice); expect(container.querySelector(`[aria-label="${checking}"]`)).toBeNull()
 await event('device-state', device({ firmwareVersion: '7.17.0', isEmulator: false, activeTransport: 'hid' }))
 await resolveStatus(status(false)) // A version alone does not qualify physical firmware.
 expect(button('buildTransaction').disabled).toBe(true); result.physicalVersions = 2
@@ -184,7 +186,7 @@ await render({ address: 'other-synthetic-owner' }); await resolveStatus(status(f
 expect(button('buildTransaction').disabled).toBe(true); result.ownerScope = true
 const before = statusCalls.length
 await render({ chain: ethereum, address: '0x' + '11'.repeat(20) }); await fill()
-expect(text()).not.toContain(notice); expect(button('buildTransaction').disabled).toBe(false)
+expect(text()).not.toContain(shownNotice); expect(button('buildTransaction').disabled).toBe(false)
 expect(statusCalls.length).toBe(before); result.otherChain = true
 await unmount()
 
@@ -193,7 +195,7 @@ await unmount(); await resolveStatus(status(true), abandoned)
 expect([...listeners.values()].every(set => set.size === 0)).toBe(true); result.unmounted = true
 
 await mount(); await fill(); await act(async () => statusCalls.at(-1)!.reject(new Error('offline status bridge'))); await settle()
-expect(button('buildTransaction').disabled).toBe(true); expect(text()).toContain('offline status bridge'); result.statusFailure = true
+expect(button('buildTransaction').disabled).toBe(true); expect(text()).toContain("Couldn't check Zcash sending support. Try again."); expect(text()).not.toContain('offline status bridge'); result.statusFailure = true
 await event('emulator-status', { state: 'running' }); await resolveStatus({ available: true })
 expect(button('buildTransaction').disabled).toBe(true); result.malformedStatus = true
 await unmount()
@@ -253,9 +255,9 @@ await act(async () => {
   oldPhysicalSign.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
 })
 await settle(); expect(calls.filter(call => call.method === 'btcSignTx')).toHaveLength(0)
-await resolveStatus(physicalStatus(false, 'physical-session-A', 'Synthetic host: unrecognized firmware hash.'))
+await resolveStatus(physicalStatus(false, 'physical-session-A', 'Synthetic host: signer session changed.'))
 expect(button('buildTransaction').disabled).toBe(true)
-expect(text()).toContain('Synthetic host: unrecognized firmware hash.')
+expect(text()).toContain("Couldn't check Zcash sending support. Try again.")
 expect(input('amountPlaceholder').value).toBe('1'); result.physicalHashRevocation = true
 
 await event('device-state', physicalDevice({ deviceId: 'synthetic-physical-device-B' })); await resolveStatus(physicalStatus(true, 'physical-session-B'))

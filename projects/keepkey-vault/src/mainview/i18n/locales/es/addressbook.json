@@ -31,6 +31,7 @@
 	"unlabeled": "Sin etiqueta",
 	"ownWallet": "Mi billetera",
 	"ownSymbol": "Mi {{symbol}}",
+	"ownTransparent": "Mi dirección transparente de {{symbol}}",
 	"edit": "Editar",
 	"delete": "Eliminar",
 	"view": "Ver",

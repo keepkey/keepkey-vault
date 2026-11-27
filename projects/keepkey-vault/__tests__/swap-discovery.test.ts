@@ -634,7 +634,7 @@ describe('assessWithFirmware — gates provider-routable chains by device firmwa
   test('ZEC passes the picker firmware gate at 7.17 and later', () => {
     expect(assessWithFirmware(ZEC, '7.17.0').status).toBe('swappable')
     expect(assessWithFirmware(ZEC, '7.18.0').status).toBe('swappable')
-    expect(zcashNu7SupportError('7.17.0', true, false)).toContain('alpha emulator')
+    expect(zcashNu7SupportError('7.17.0', true, false)).toContain('firmware 7.17')
   })
 
   test.each(['7.14.1', '7.15.0', '7.16.0', '7.16.99'])('ZEC is unsupported_firmware on %s', firmware => {

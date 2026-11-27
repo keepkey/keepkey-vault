@@ -30,7 +30,8 @@ import { describeBalanceError } from '../../shared/send-balance-errors'
 import { amountPlusFeeExceedsBalance, cosmosDisplayFee, cosmosSendFee } from '../../shared/cosmos-fee'
 import { getNumberLocale } from '../lib/number-locale'
 import { useZcashNu7Support } from '../hooks/useZcashNu7Support'
-import { parseSendQr } from '../../shared/send-qr'
+import { ZCASH_NU7_UNSUPPORTED_MESSAGE } from '../../shared/zcash-nu7'
+import { parseSendQrResult } from '../../shared/send-qr'
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
@@ -428,6 +429,12 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		return () => { alive = false; clearTimeout(handle) }
 	}, [recipient, activeCaip, addressValid, vaultDestinationRetry, evmChainId, destinationKey])
 
+	// Why Build is disabled, so a greyed-out button never looks like a dead click.
+	const buildBlocker = !recipient ? t('buildNeedsRecipient')
+		: isSelfSend && !selfSendConfirmed ? t('buildNeedsSelfSendConfirm')
+		: recipientNeedsAck && !riskConfirmed ? t('buildNeedsRiskConfirm')
+		: !amount && !isMax ? t('buildNeedsAmount') : null
+
 	const handleBuild = useCallback(async () => {
 		if (!senderReady || !zcashSupport.canSend()) return
 		if ((isSelfSend && !selfSendConfirmed) || (recipientNeedsAck && !riskConfirmed) || recipientRisk?.kind === 'sentToken') return
@@ -508,7 +515,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		setError(null)
 
 		try {
-			const result = await signOnDevice(context.signMethod, buildResult.unsignedTx)
+			const result = await signOnDevice(context.signMethod, buildResult.unsignedTx, () => operationIsCurrent(generation))
 			if (!operationIsCurrent(generation)) return
 			setSignedTx(result)
 			setPhase('signed')
@@ -607,8 +614,13 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	// Parse QR scan result — handles plain addresses and BIP-21 / EIP-681 URIs
 	const handleQrScan = useCallback((data: string) => {
 		setShowScanner(false)
-		const parsed = parseSendQr(data, chain, isTokenSend)
-		if (!parsed) { setError(t('invalidAddress')); return }
+		const result = parseSendQrResult(data, chain, isTokenSend)
+		if (!result.ok) {
+			setError(result.reason === 'unsupported' ? t('qrUnsupported') : result.reason === 'amount' ? t('qrBadAmount')
+				: result.reason === 'network' ? t('qrWrongNetwork') : t('invalidAddress'))
+			return
+		}
+		const parsed = result.payment
 		setRecipient(parsed.recipient)
 		// A label is not an on-chain memo; a new scan also clears a stale tag.
 		setMemo(parsed.memo)
@@ -714,7 +726,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 			{chain.id === 'zcash' && !zcashSupport.available && (zcashSupport.pending || zcashSupport.reason) && (
 				<Flex role="status" align="center" gap="2" px="3" py="2" borderRadius="10px" bg="var(--ink-2)">
 					{zcashSupport.pending && <Spinner size="xs" flexShrink={0} aria-label={uiText("Checking Zcash sending support…")} />}
-					<Text fontSize="xs" color="kk.textMuted">{zcashSupport.pending ? uiText("Checking Zcash sending support…") : zcashSupport.reason}</Text>
+					<Text fontSize="xs" color="kk.textMuted">{zcashSupport.pending ? uiText("Checking Zcash sending support…")
+						: zcashSupport.reason === ZCASH_NU7_UNSUPPORTED_MESSAGE ? uiText("Your KeepKey needs firmware 7.17 or later to send Zcash.")
+						: zcashSupport.reason?.includes('transaction builder') ? uiText("Update KeepKey Desktop to send Zcash.")
+						: uiText("Couldn't check Zcash sending support. Try again.")}</Text>
 				</Flex>
 			)}
 			{/* Gas balance hint for token sends */}
@@ -1071,6 +1086,9 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 						<Text fontSize="xs" color="kk.error">{t("exceedsBalanceWithFee", { fee: formatBalance(cosmosFee!), balance: formatBalance(displayBalance), symbol: displaySymbol })}</Text>
 					)}
 
+					{buildBlocker && (
+						<Text fontSize="xs" color="kk.textMuted" role="status">{buildBlocker}</Text>
+					)}
 					{/* Self-send and burn/contract recipients: Build waits for the explicit confirmation above. */}
 					{(isSelfSend && !selfSendConfirmed) || (recipientNeedsAck && !riskConfirmed) ? (
 						<Button w="full" px="4" py="2" borderRadius="12px" bg="var(--gold)" color="var(--ink-0)" fontWeight="600" onClick={handleBuild} disabled>
@@ -1103,12 +1121,12 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("to")}</Text>
 							{/* Full address, never truncated: this is what the user checks against the device. */}
-							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" maxW="300px" textAlign="right" wordBreak="break-all">{currentSigningContext.recipient}</Text>
+							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" flex="1" minW="0" ml="3" textAlign="right" wordBreak="break-all">{currentSigningContext.recipient}</Text>
 						</Flex>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("amount")}</Text>
 							<Flex direction="column" align="flex-end">
-								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{currentSigningContext.isMax ? (maxSentAmount ?? 'MAX') : currentSigningContext.amount} {currentSigningContext.displaySymbol}</Text>
+								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" title={currentSigningContext.isMax && maxSentAmount ? maxSentAmount : undefined}>{currentSigningContext.isMax ? (maxSentAmount ? formatBalance(maxSentAmount) : 'MAX') : currentSigningContext.amount} {currentSigningContext.displaySymbol}</Text>
 								{!isMax && amountUsdPreview !== null && (
 									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(amountUsdPreview)}</Text>
 								)}
@@ -1124,7 +1142,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 							</Flex>
 						</Flex>
 						{feeOverQuarter && (
-							<Text fontSize="xs" color="kk.error" mt="1">{t('feeOverQuarter')}</Text>
+							<Text fontSize="xs" color="kk.error" mt="1">{supportsCustomFee ? t('feeOverQuarter') : t('feeOverQuarterFixed')}</Text>
 						)}
 					</Box>
 

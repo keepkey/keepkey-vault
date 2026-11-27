@@ -97,5 +97,16 @@
 	"insufficientZcashMinimumFeeExact": "ZEC insuffisant pour les frais de réseau minimum de {{fee}} ZEC. Essayez d'envoyer un montant un peu plus petit.",
 	"insufficientXrpReserve": "XRP insuffisant après la réserve du compte et les frais de réseau.",
 	"insufficientTronMaxReserve": "TRX insuffisant pour envoyer le maximum après avoir réservé {{reserve}} TRX pour les frais de réseau.",
-	"exceedsBalanceWithFee": "Le montant plus les frais de réseau ({{fee}} {{symbol}}) dépasse le solde disponible ({{balance}} {{symbol}})."
+	"exceedsBalanceWithFee": "Le montant plus les frais de réseau ({{fee}} {{symbol}}) dépasse le solde disponible ({{balance}} {{symbol}}).",
+	"qrUnsupported": "Ce QR code est une demande de paiement que KeepKey Desktop ne peut pas exécuter. Rien n'a été rempli.",
+	"qrBadAmount": "Le montant de ce QR code n'est pas valide pour cet actif.",
+	"qrWrongNetwork": "Ce QR code concerne un autre réseau.",
+	"feeOverQuarterFixed": "Les frais dépassent 25 % du montant envoyé. Les frais de ce réseau sont fixes : envisagez d'envoyer un montant plus élevé.",
+	"buildNeedsRecipient": "Saisissez une adresse de destination.",
+	"buildNeedsSelfSendConfirm": "Confirmez ci-dessus l'envoi vers votre propre adresse pour continuer.",
+	"buildNeedsRiskConfirm": "Confirmez ci-dessus l'avertissement sur le destinataire pour continuer.",
+	"buildNeedsAmount": "Saisissez un montant.",
+	"insufficientStakingFee": "Pas assez de {{symbol}} pour le montant à staker et les frais de réseau.",
+	"insufficientRegistrationFee": "Pas assez de {{symbol}} pour l'enregistrement et les frais de réseau.",
+	"insufficientSolanaMaxSwap": "Pas assez de SOL pour couvrir les frais de réseau Solana."
 }

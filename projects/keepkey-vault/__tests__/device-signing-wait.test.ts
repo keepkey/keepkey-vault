@@ -7,3 +7,11 @@ test('Staking and Name registration wait on the KeepKey with no client timeout a
   if (run.exitCode) throw new Error(run.stderr.toString() || run.stdout.toString())
   expect(JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!)).toEqual({ staking: true, names: true })
 }, 35000)
+
+test('a sign survives a reconnecting socket, and busy-waits end with the dialog without cancelling another request', () => {
+  const run = Bun.spawnSync([process.execPath, new URL('./support/rpc-reconnect-signing.ts', import.meta.url).pathname], {
+    cwd: new URL('../', import.meta.url).pathname, stdout: 'pipe', stderr: 'pipe', timeout: 20000,
+  })
+  if (run.exitCode) throw new Error(run.stderr.toString() || run.stdout.toString())
+  expect(JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!)).toEqual({ queuedUntilOpen: true, signResolved: true, stopsWhenClosed: true, cancelOnlyOwn: true })
+}, 25000)

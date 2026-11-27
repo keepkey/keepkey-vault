@@ -97,5 +97,16 @@
 	"insufficientZcashMinimumFeeExact": "ZEC ไม่พอสำหรับค่าธรรมเนียมเครือข่ายขั้นต่ำ {{fee}} ZEC ลองส่งจำนวนที่น้อยลงเล็กน้อย",
 	"insufficientXrpReserve": "XRP ไม่พอหลังหักเงินสำรองบัญชีและค่าธรรมเนียมเครือข่าย",
 	"insufficientTronMaxReserve": "TRX ไม่พอที่จะส่งจำนวนสูงสุดหลังกันไว้ {{reserve}} TRX สำหรับค่าธรรมเนียมเครือข่าย",
-	"exceedsBalanceWithFee": "จำนวนเงินรวมค่าธรรมเนียมเครือข่าย ({{fee}} {{symbol}}) เกินยอดคงเหลือที่ใช้ได้ ({{balance}} {{symbol}})"
+	"exceedsBalanceWithFee": "จำนวนเงินรวมค่าธรรมเนียมเครือข่าย ({{fee}} {{symbol}}) เกินยอดคงเหลือที่ใช้ได้ ({{balance}} {{symbol}})",
+	"qrUnsupported": "QR โค้ดนี้เป็นคำขอชำระเงินที่ KeepKey Desktop ดำเนินการไม่ได้ ยังไม่มีการกรอกข้อมูลใด",
+	"qrBadAmount": "จำนวนเงินใน QR โค้ดนี้ไม่ถูกต้องสำหรับสินทรัพย์นี้",
+	"qrWrongNetwork": "QR โค้ดนี้เป็นของเครือข่ายอื่น",
+	"feeOverQuarterFixed": "ค่าธรรมเนียมเกิน 25% ของจำนวนที่ส่ง ค่าธรรมเนียมของเครือข่ายนี้คงที่ ลองส่งจำนวนที่มากขึ้น",
+	"buildNeedsRecipient": "กรอกที่อยู่ผู้รับ",
+	"buildNeedsSelfSendConfirm": "ยืนยันการส่งไปยังที่อยู่ของคุณเองด้านบนเพื่อดำเนินการต่อ",
+	"buildNeedsRiskConfirm": "ยืนยันคำเตือนเกี่ยวกับผู้รับด้านบนเพื่อดำเนินการต่อ",
+	"buildNeedsAmount": "กรอกจำนวน",
+	"insufficientStakingFee": "{{symbol}} ไม่พอสำหรับจำนวนที่สเตกและค่าธรรมเนียมเครือข่าย",
+	"insufficientRegistrationFee": "{{symbol}} ไม่พอสำหรับการลงทะเบียนและค่าธรรมเนียมเครือข่าย",
+	"insufficientSolanaMaxSwap": "SOL ไม่พอสำหรับค่าธรรมเนียมเครือข่าย Solana"
 }

@@ -8,6 +8,7 @@
  * (contract code + initial data with public key) to deploy the wallet on-chain.
  */
 import { createHash } from 'crypto'
+import { balanceErrorMessage } from '../../shared/send-balance-errors'
 import {
   Address,
   beginCell,
@@ -544,6 +545,31 @@ export interface TonBuildResult {
     bounce: boolean
     memo?: string
   }
+}
+
+// Fee reserve kept back on a TON send: ~0.01 TON, double when the first
+// transfer also deploys the wallet.
+export const TON_FEE_RESERVE_NANO = 10_000_000n
+export const TON_DEPLOY_FEE_RESERVE_NANO = 20_000_000n
+
+/** Amount to send, checked against the balance read at send time. send_mode 3
+ * ignores errors: an overspend would only burn the fee, so refuse it here.
+ * MAX sends the balance less the fee reserve. */
+export function tonSendAmountNano(amount: string, isMax: boolean, balanceNano: string, needsDeploy: boolean): string {
+  if (!/^\d+$/.test(balanceNano)) throw new Error('Cannot verify TON balance before sending')
+  const balance = BigInt(balanceNano)
+  const reserve = needsDeploy ? TON_DEPLOY_FEE_RESERVE_NANO : TON_FEE_RESERVE_NANO
+  const ton = (nano: bigint) => Number(nano) / 1e9
+  if (isMax) {
+    if (balance <= reserve) throw new Error(balanceErrorMessage('gasForMax'))
+    return String(balance - reserve)
+  }
+  const [whole = '0', frac = ''] = amount.split('.')
+  const nano = BigInt(whole || '0') * 1_000_000_000n + BigInt(frac.slice(0, 9).padEnd(9, '0'))
+  if (nano + reserve > balance) {
+    throw new Error(balanceErrorMessage('amountAndGas', { have: ton(balance), need: ton(nano + reserve), symbol: 'TON' }))
+  }
+  return String(nano)
 }
 
 /** Build a TON v4r2 wallet transfer. Returns unsigned body hash + data for signing. */

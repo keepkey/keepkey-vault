@@ -25,7 +25,7 @@ describe('TRON max send', () => {
     expect(result.fee).toBe('1.1')
   })
 
-  test('TRC-20 max reserves one token base unit before encoding transfer amount', async () => {
+  test('TRC-20 max sends the whole balance of a token with 8 or fewer decimals', async () => {
     const grid = fakeTronGrid()
     globalThis.fetch = grid.handler
 
@@ -37,7 +37,7 @@ describe('TRON max send', () => {
     const req = grid.requests.triggersmartcontract[0]
     expect(req.contract_address).toBe(usdtContract)
     expect(req.function_selector).toBe('transfer(address,uint256)')
-    expect(BigInt(`0x${req.parameter.slice(64)}`)).toBe(123_449_999n)
+    expect(BigInt(`0x${req.parameter.slice(64)}`)).toBe(123_450_000n)
     expect(result.unsignedTx.tronGridTx.txID).toBe('trc20')
     expect(Number(result.fee)).toBeGreaterThan(0)
   })

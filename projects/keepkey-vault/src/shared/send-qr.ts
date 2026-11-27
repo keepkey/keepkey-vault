@@ -54,68 +54,84 @@ export interface ScannedPayment {
  * function calls, ambiguous amounts, invalid tags and wrong networks fail as a
  * whole; the caller must leave the current draft untouched on null. */
 export function parseSendQr(data: string, chain: ChainDef, isTokenSend = false): ScannedPayment | null {
+  const result = parseSendQrResult(data, chain, isTokenSend)
+  return result.ok ? result.payment : null
+}
+
+/** Why a scanned code was refused, so the form can say more than "invalid address". */
+export type SendQrRefusal = 'unsupported' | 'amount' | 'network' | 'address'
+export type SendQrResult = { ok: true; payment: ScannedPayment } | { ok: false; reason: SendQrRefusal }
+const refuse = (reason: SendQrRefusal): SendQrResult => ({ ok: false, reason })
+
+export function parseSendQrResult(data: string, chain: ChainDef, isTokenSend = false): SendQrResult {
   const clean = data.trim()
-  if (!clean || clean.length > 4096 || /[\x00-\x1f\x7f#]/.test(clean)) return null
+  if (!clean || clean.length > 4096 || /[\x00-\x1f\x7f#]/.test(clean)) return refuse('address')
   const schemeMatch = clean.match(/^([a-z][a-z0-9+.-]*):(.*)$/i)
   const scheme = schemeMatch?.[1].toLowerCase()
-  if (scheme && (scheme === 'ethereum' ? chain.chainFamily !== 'evm' : !SCHEMES[chain.id]?.includes(scheme))) return null
+  if (scheme && (scheme === 'ethereum' ? chain.chainFamily !== 'evm' : !SCHEMES[chain.id]?.includes(scheme))) return refuse('network')
   let payload = schemeMatch ? schemeMatch[2] : clean
   // TON deep links (docs.ton.org wallet-apps/deep-links) carry the address in the
   // path, as Vault's own receive QR does: ton://transfer/<address>. Any other
   // ton:// action is not a payment.
   if (scheme === 'ton' && payload.startsWith('//')) {
     const link = payload.match(/^\/\/transfer\/([^/?]+)(\?.*)?$/)
-    if (!link) return null
+    if (!link) return refuse('unsupported')
     payload = link[1] + (link[2] ?? '')
   }
   const separator = payload.indexOf('?')
   let recipient = separator < 0 ? payload : payload.slice(0, separator)
   const params = new URLSearchParams(separator < 0 ? '' : payload.slice(separator + 1))
   for (const key of params.keys()) {
-    if (key.startsWith('req-')) return null
+    if (key.startsWith('req-')) return refuse('unsupported')
     // An unsupported mint/asset selection cannot be dropped while interpreting
     // its amount as the selected native coin (or a different selected token).
-    if (['spl-token', 'jetton', 'asset', 'assetid', 'token', 'tokenaddress', 'contractaddress', 'contract', 'currency', 'issuer', 'denom'].includes(key.toLowerCase())) return null
+    if (['spl-token', 'jetton', 'asset', 'assetid', 'token', 'tokenaddress', 'contractaddress', 'contract', 'currency', 'issuer', 'denom'].includes(key.toLowerCase())) return refuse('unsupported')
+    // Solana Pay `reference` lets the merchant find the payment; sending without
+    // it can leave the order unpaid, so the request is refused rather than dropped.
+    if (scheme === 'solana' && key.toLowerCase() === 'reference') return refuse('unsupported')
     // Without a function path, EIP-681 still must not turn typed contract args
     // or calldata into an ordinary native payment to the contract address.
-    if (scheme === 'ethereum' && !['value', 'amount', 'label', 'message', 'gas', 'gasLimit', 'gasPrice'].includes(key)) return null
+    if (scheme === 'ethereum' && !['value', 'amount', 'label', 'message', 'gas', 'gasLimit', 'gasPrice'].includes(key)) return refuse('unsupported')
   }
-  for (const key of ['amount', 'value', 'memo', 'dt']) if (params.getAll(key).length > 1) return null
+  for (const key of ['amount', 'value', 'memo', 'dt', 'tag', 'destination_tag']) if (params.getAll(key).length > 1) return refuse('unsupported')
   // A TON comment/payload/StateInit has no field in the send form; dropping it
   // could lose an exchange deposit comment, so the request fails as a whole.
-  if (scheme === 'ton' && ['text', 'bin', 'init'].some(key => params.getAll(key).some(Boolean))) return null
+  if (scheme === 'ton' && ['text', 'bin', 'init'].some(key => params.getAll(key).some(Boolean))) return refuse('unsupported')
 
   if (scheme === 'ethereum') {
     // Contract/function requests cannot be reinterpreted as ordinary sends.
     const target = recipient.match(/^(?:pay-)?(0x[0-9a-f]{40})(?:@([0-9]{1,78}))?$/i)
-    if (!target) return null
+    if (!target) return refuse('unsupported')
     const selectedChainId = chain.networkId.match(/^eip155:(\d+)$/)?.[1]
-    if (target[2] && (!selectedChainId || BigInt(target[2]) !== BigInt(selectedChainId))) return null
+    if (target[2] && (!selectedChainId || BigInt(target[2]) !== BigInt(selectedChainId))) return refuse('network')
     recipient = target[1]
   }
-  if (!validateAddress(recipient, chain).valid) return null
+  if (!validateAddress(recipient, chain).valid) return refuse('address')
 
   let amount: string | undefined
   if (!isTokenSend) {
-    if (params.has('value') && (scheme !== 'ethereum' || params.has('amount'))) return null
+    if (params.has('value') && (scheme !== 'ethereum' || params.has('amount'))) return refuse('amount')
     const requested = params.has('value') ? eip681ValueToAmount(params.get('value')!, chain.decimals)
       : params.has('amount') ? (scheme === 'ton' ? tonAmount(params.get('amount')!, chain.decimals) : coinAmount(params.get('amount')!, chain.decimals)) : undefined
-    if (requested === null) return null
+    if (requested === null) return refuse('amount')
     amount = requested
   }
   // A memo on a chain with no visible memo field must not become a hidden
   // on-chain value or disappear from a request that relied on it (e.g. Zcash).
-  if (!isTokenSend && chain.chainFamily !== 'cosmos' && chain.chainFamily !== 'xrp' && params.get('memo')) return null
+  if (!isTokenSend && chain.chainFamily !== 'cosmos' && chain.chainFamily !== 'xrp' && params.get('memo')) return refuse('unsupported')
   let memo = ''
   if (!isTokenSend && chain.chainFamily === 'xrp') {
-    if (params.has('dt')) {
-      const tag = params.get('dt')!
+    // `dt` is the common XRP URI key; some wallets write tag / destination_tag.
+    const tagKeys = ['dt', 'tag', 'destination_tag'].filter(key => params.has(key))
+    if (tagKeys.length > 1) return refuse('unsupported')
+    if (tagKeys.length) {
+      const tag = params.get(tagKeys[0])!
       // DestinationTag is UInt32. Preserve its digits in the form; the builder
       // normalizes the integer after the user reviews the destination.
-      if (!/^\d{1,10}$/.test(tag) || BigInt(tag) > 4294967295n) return null
+      if (!/^\d{1,10}$/.test(tag) || BigInt(tag) > 4294967295n) return refuse('unsupported')
       memo = tag
     }
   } else if (!isTokenSend && chain.chainFamily === 'cosmos') memo = params.get('memo') ?? ''
   // BIP-21/321 label and message are presentation metadata, never on-chain memo.
-  return { recipient, ...(amount !== undefined ? { amount } : {}), memo }
+  return { ok: true, payment: { recipient, ...(amount !== undefined ? { amount } : {}), memo } }
 }

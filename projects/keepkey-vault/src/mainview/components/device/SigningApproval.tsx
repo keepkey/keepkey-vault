@@ -1288,14 +1288,19 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 	// ── Approve phase ─────────────────────────────────────────────────
 	// One status mark per row. "No funds move" comes only from the request
 	// type (signing-review-guide), never from the requesting app; "Paired app"
-	// only when the backend vouched for the pairing token.
+	// (neutral) only when the backend vouched for the pairing token.
 	const preflight: PreflightRow[] = []
 	if (firmwareCannotSign) preflight.push({ key: 'fw', status: 'block', tag: uiText("blocks"), title: t("signing.firmwareCannotSign", "This KeepKey firmware cannot sign this") })
 	if (advancedModeBlocked) preflight.push({ key: 'adv', status: 'block', tag: uiText("blocks"), title: t("signing.turnOnAdvancedMode", "Turn on Advanced Mode"), detail: t("signing.advancedModeScopeHint", "Advanced Mode stays on until your KeepKey locks or is unplugged, for every app that uses it.") })
 	if (blindSigningConsentBlocked) preflight.push({ key: 'consent', status: 'block', tag: uiText("blocks"), title: t("signing.allowBlindSigningOnceFirst", "Choose Allow once to approve") })
 	guide.warnings.forEach((w, i) => preflight.push({ key: `w${i}`, status: 'warn', title: uiText(w), attrs: { 'data-review-warning': '' } }))
 	if (guide.noFundsMove) preflight.push({ key: 'funds', status: 'ok', title: uiText("No funds move now"), detail: uiText("A message signature, not a transaction.") })
-	if (request.appPaired) preflight.push({ key: 'paired', status: 'ok', title: uiText("Paired app"), detail: uiText("{{app}}, approved on this computer.", { app: safeAppName }) })
+	// The app name is self-declared; the origin is what the browser reported when it paired. Neutral, not a check.
+	if (request.appPaired) preflight.push({ key: 'paired', status: 'info', title: uiText("Paired app"), detail: request.appOrigin === undefined
+		? uiText("Calls itself {{app}}, origin unknown.", { app: safeAppName })
+		: request.appOrigin
+			? uiText("Calls itself {{app}}, paired from {{origin}}.", { app: safeAppName, origin: request.appOrigin })
+			: uiText("Calls itself {{app}}, paired from a local app (no web origin).", { app: safeAppName }) })
 
 	return (
 		<Box

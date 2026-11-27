@@ -97,5 +97,16 @@
 	"insufficientZcashMinimumFeeExact": "Không đủ ZEC để trả phí mạng tối thiểu {{fee}} ZEC. Hãy thử gửi số tiền nhỏ hơn một chút.",
 	"insufficientXrpReserve": "Không đủ XRP sau khi trừ dự trữ tài khoản và phí mạng.",
 	"insufficientTronMaxReserve": "Không đủ TRX để gửi tối đa sau khi giữ lại {{reserve}} TRX cho phí mạng.",
-	"exceedsBalanceWithFee": "Số tiền cộng phí mạng ({{fee}} {{symbol}}) vượt quá số dư khả dụng ({{balance}} {{symbol}})."
+	"exceedsBalanceWithFee": "Số tiền cộng phí mạng ({{fee}} {{symbol}}) vượt quá số dư khả dụng ({{balance}} {{symbol}}).",
+	"qrUnsupported": "Mã QR này là yêu cầu thanh toán mà KeepKey Desktop không thể thực hiện. Chưa có gì được điền.",
+	"qrBadAmount": "Số tiền trong mã QR này không hợp lệ cho tài sản này.",
+	"qrWrongNetwork": "Mã QR này dành cho một mạng khác.",
+	"feeOverQuarterFixed": "Phí vượt quá 25% số tiền bạn gửi. Phí của mạng này là cố định, hãy cân nhắc gửi số tiền lớn hơn.",
+	"buildNeedsRecipient": "Nhập địa chỉ người nhận.",
+	"buildNeedsSelfSendConfirm": "Xác nhận việc gửi đến địa chỉ của chính bạn ở trên để tiếp tục.",
+	"buildNeedsRiskConfirm": "Xác nhận cảnh báo về người nhận ở trên để tiếp tục.",
+	"buildNeedsAmount": "Nhập số tiền.",
+	"insufficientStakingFee": "Không đủ {{symbol}} cho số tiền staking và phí mạng.",
+	"insufficientRegistrationFee": "Không đủ {{symbol}} cho việc đăng ký và phí mạng.",
+	"insufficientSolanaMaxSwap": "Không đủ SOL để trả phí mạng Solana."
 }

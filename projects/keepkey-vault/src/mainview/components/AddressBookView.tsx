@@ -1,4 +1,5 @@
 import { useUiTranslation } from "../i18n/ui"
+import { isEnsName } from "../../shared/ens"
 import { addressBookLabel } from "../lib/addressbook-label"
 import { useState, useMemo, useCallback, useEffect } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
@@ -410,6 +411,12 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
               </Flex>
             )}
             {entry.isEns && <Text fontSize="9px" color="var(--teal)" px="1" borderRadius="sm" border="1px solid var(--teal)" title={entry.ensName}>ENS</Text>}
+            {/* Older Vaults saved the ENS name itself. Never resolve it silently: the user re-adds it and confirms the address. */}
+            {entry.networkId.startsWith("eip155:") && isEnsName(entry.address) && (
+              <Text fontSize="9px" fontWeight="700" color="var(--rose)" px="1" borderRadius="sm" border="1px solid var(--rose)" title={uiText("Add this name again to confirm the address it points to")}>
+                {uiText("Unresolved name")}
+              </Text>
+            )}
             {entry.cosigner && (
               <Text fontSize="9px" fontWeight="700" color="var(--gold)" textTransform="uppercase" letterSpacing="0.04em" px="1" borderRadius="sm" border="1px solid var(--gold)">
                 {t("cosigner", { defaultValue: "Co-signer" })}

@@ -140,7 +140,7 @@ export async function handleV2DataRoute(
       const broadcastChain = resolveChain?.(body.networkId) ?? CHAINS.find(c => c.networkId === body.networkId)
       if (broadcastChain?.chainFamily === 'cosmos' || broadcastChain?.chainFamily === 'xrp') {
         if (!parsedTxid) throw new Error('Broadcast rejected or returned no transaction hash')
-        await confirmAccountTx(broadcastChain, parsedTxid)
+        confirmAccountTx(broadcastChain, parsedTxid).catch(error => console.warn(`[broadcast] ${error?.message || error}`))
       }
       const txid = parsedTxid && signedHereThisSession?.(body.serialized) ? parsedTxid : undefined
       const chain = txid ? (resolveChain?.(body.networkId) ?? CHAINS.find(c => c.networkId === body.networkId)) : undefined

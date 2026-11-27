@@ -97,5 +97,16 @@
 	"insufficientZcashMinimumFeeExact": "最低ネットワーク手数料 {{fee}} ZEC に対して ZEC が不足しています。少し少ない金額で送金してみてください。",
 	"insufficientXrpReserve": "アカウントのリザーブとネットワーク手数料を差し引くと XRP が不足しています。",
 	"insufficientTronMaxReserve": "ネットワーク手数料用に {{reserve}} TRX を確保すると、最大額を送金するための TRX が不足しています。",
-	"exceedsBalanceWithFee": "金額とネットワーク手数料 ({{fee}} {{symbol}}) の合計が利用可能な残高 ({{balance}} {{symbol}}) を超えています。"
+	"exceedsBalanceWithFee": "金額とネットワーク手数料 ({{fee}} {{symbol}}) の合計が利用可能な残高 ({{balance}} {{symbol}}) を超えています。",
+	"qrUnsupported": "このQRコードはKeepKey Desktopで処理できない支払いリクエストです。何も入力されていません。",
+	"qrBadAmount": "このQRコードの金額はこの資産では無効です。",
+	"qrWrongNetwork": "このQRコードは別のネットワーク用です。",
+	"feeOverQuarterFixed": "手数料が送金額の25%を超えています。このネットワークの手数料は固定なので、より大きな金額の送金を検討してください。",
+	"buildNeedsRecipient": "送金先アドレスを入力してください。",
+	"buildNeedsSelfSendConfirm": "続行するには、上で自分のアドレスへの送金を確認してください。",
+	"buildNeedsRiskConfirm": "続行するには、上で送金先の警告を確認してください。",
+	"buildNeedsAmount": "金額を入力してください。",
+	"insufficientStakingFee": "ステーキング額とネットワーク手数料に対して{{symbol}}が不足しています。",
+	"insufficientRegistrationFee": "登録とネットワーク手数料に対して{{symbol}}が不足しています。",
+	"insufficientSolanaMaxSwap": "Solanaのネットワーク手数料に対してSOLが不足しています。"
 }

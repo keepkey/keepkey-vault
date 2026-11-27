@@ -11,7 +11,7 @@ import { confirmAccountTx } from './confirm-account-tx'
 import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
 import { sendShielded, type ShieldedSendParams } from './zcash-shielded'
-import { buildTonTransfer, assembleTonSignedBoc, getTonSeqno, getTonWalletState, broadcastTonBoc, type TonBuildResult } from './ton'
+import { buildTonTransfer, tonSendAmountNano, assembleTonSignedBoc, getTonSeqno, getTonWalletState, broadcastTonBoc, type TonBuildResult } from './ton'
 import { buildHiveTransfer, broadcastHiveTx } from './hive'
 import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
 import { signSolanaWireTransaction } from '../solana-signing'
@@ -22,6 +22,7 @@ import { canonicalTronAddress, decodeTronTransfer } from '../tron-preview'
 import { getPioneerApiBase } from '../pioneer'
 import { ARBITRUM_ONE_RPC } from '../evm-rpc'
 import { broadcastHttpRejectionReason, broadcastRejectionReason } from './broadcast-error'
+import { assertTronEnergyAffordable } from './tron-energy'
 import { balanceErrorMessage } from '../../shared/send-balance-errors'
 
 /** BTC mainnet — the only UTXO chain that broadcasts via a self-host node. */
@@ -520,6 +521,7 @@ export async function buildTx(
         // Estimate the REAL fee for display — showing the 100 TRX ceiling as
         // "the fee" would 4-10x overstate a typical transfer. Simulate the
         // call for its energy cost and price it at the chain's getEnergyFee.
+        let energyEstimate: { used: number; priceSun: number } | undefined
         let displayFeeTrx = String(FEE_LIMIT_SUN / 1_000_000) // ponytail: fallback = ceiling (upper bound, honest as "max fee")
         try {
           const [simResp, chainParamsResp] = await Promise.all([
@@ -542,9 +544,19 @@ export async function buildTx(
           const energyPriceSun = Number(chainParams?.chainParameter?.find((p: any) => p.key === 'getEnergyFee')?.value)
           if (energyUsed > 0 && energyPriceSun > 0) {
             displayFeeTrx = String(Math.min(energyUsed * energyPriceSun, FEE_LIMIT_SUN) / 1_000_000)
+            energyEstimate = { used: energyUsed, priceSun: energyPriceSun }
           }
         } catch (e: any) {
           console.warn(`[buildTx] TRON fee estimate failed, displaying fee_limit: ${e.message}`)
+        }
+        // Refuse before signing when the energy burn would exceed the TRX balance.
+        if (energyEstimate) {
+          const [balanceSun, resources] = await Promise.all([
+            fetchTronNativeBalanceSun(params.fromAddress),
+            tronWalletFetch('getaccountresource', { address: params.fromAddress, visible: true }).then(r => r.json() as any),
+          ]).catch((e: any) => { throw new Error(`Cannot verify TRX balance for the energy fee: ${e.message}`) })
+          const energyAvailable = (Number(resources?.EnergyLimit) || 0) - (Number(resources?.EnergyUsed) || 0)
+          assertTronEnergyAffordable(energyEstimate.used, energyEstimate.priceSun, energyAvailable, balanceSun)
         }
 
         // Firmware 7.15+ parses TriggerSmartContract directly from raw_data,
@@ -629,13 +641,6 @@ export async function buildTx(
       // TON — build v4r2 wallet transfer, device signs cell hash
       if (!params.fromAddress) throw new Error('fromAddress required for TON')
 
-      // Convert TON amount to nanoTON (9 decimals)
-      const nanoTon = (() => {
-        const parts = params.amount.split('.')
-        const whole = parts[0] || '0'
-        const frac = (parts[1] || '').slice(0, 9).padEnd(9, '0')
-        return String(BigInt(whole) * 1000000000n + BigInt(frac))
-      })()
 
       // Check wallet state — uninitialized wallets need StateInit in first tx
       let walletState: { initialized: boolean; balance: string }
@@ -652,6 +657,7 @@ export async function buildTx(
       }
 
       const needsDeploy = !walletState.initialized
+      const nanoTon = tonSendAmountNano(params.amount, !!params.isMax, walletState.balance, needsDeploy)
       console.debug(`[buildTx] TON wallet state: initialized=${walletState.initialized}, seqno=${seqno}, needsDeploy=${needsDeploy}`)
       if (needsDeploy && !params.publicKeyHex) {
         throw new Error('TON wallet not initialized — public key required for deployment')
@@ -996,7 +1002,9 @@ export async function broadcastTx(
 
   const txid = data?.txid || data?.tx_hash || data?.hash || (typeof data === 'string' && data.length >= 32 ? data : undefined)
   if (txid) {
-    await confirmAccountTx(chain, txid)
+    // Accepted is recorded now; execution is checked in the background (the
+    // tx watcher follows the recorded row). A failed check must never erase it.
+    confirmAccountTx(chain, txid).catch(error => console.error(`[broadcast] ${error?.message || error}`))
     return { txid }
   }
 

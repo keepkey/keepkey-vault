@@ -27,6 +27,10 @@ export const BALANCE_ERRORS = {
   // XRP and TRON
   xrpReserve: 'Insufficient XRP after account reserve and transaction fee',
   tronMaxReserve: 'Insufficient TRX for max send after reserving {reserve} TRX for network fees',
+  // Staking, name registration and swaps (shown by their own screens)
+  staking: 'Insufficient {symbol} spendable balance for staking and transaction fee',
+  registration: 'Insufficient {symbol} spendable balance for registration and transaction fee',
+  solanaMaxSwap: 'Insufficient SOL for max swap: balance does not cover the Solana network fee',
 } as const
 
 export type BalanceErrorKind = keyof typeof BALANCE_ERRORS
@@ -47,6 +51,9 @@ const KEYS: Record<BalanceErrorKind, string> = {
   zcashMinimumFeeExact: 'insufficientZcashMinimumFeeExact',
   xrpReserve: 'insufficientXrpReserve',
   tronMaxReserve: 'insufficientTronMaxReserve',
+  staking: 'insufficientStakingFee',
+  registration: 'insufficientRegistrationFee',
+  solanaMaxSwap: 'insufficientSolanaMaxSwap',
 }
 
 type Params = Record<string, string | number>

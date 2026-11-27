@@ -38,7 +38,7 @@ describe('Nu7 admission precedes device acquisition', () => {
       run: async action => { acquisitions++; return action() },
       preflight: (name, data) => preflightNu7DeviceRpc(name, data, '7.17.0', true, false),
     })
-    await expect(rpc[method]({ ...params, isEmulator: true, isAlphaEmulator: true, firmwareVersion: '7.17.0' })).rejects.toThrow(/alpha emulator/i)
+    await expect(rpc[method]({ ...params, isEmulator: true, isAlphaEmulator: true, firmwareVersion: '7.17.0' })).rejects.toThrow(/firmware 7\.17/i)
     expect(acquisitions).toBe(0)
     expect(dispatched).toBe(0)
   })

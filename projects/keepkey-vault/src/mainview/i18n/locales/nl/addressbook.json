@@ -31,6 +31,7 @@
 	"unlabeled": "Zonder label",
 	"ownWallet": "Mijn wallet",
 	"ownSymbol": "Mijn {{symbol}}",
+	"ownTransparent": "Mijn transparante {{symbol}}-adres",
 	"edit": "Bewerken",
 	"delete": "Verwijderen",
 	"view": "Bekijken",

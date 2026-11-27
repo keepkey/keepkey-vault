@@ -52,7 +52,7 @@
 	"selectDelegation": "Selecionar delegacao...",
 	"unknownValidator": "Validador desconhecido",
 	"refreshStaking": "Atualizar staking",
-	"noPositions": "Nenhuma posicao de staking encontrada.",
+	"noPositions": "Nenhuma posição de staking encontrada.",
 	"delegateToEarn": "Delegue {{symbol}} para ganhar recompensas.",
 	"failedToLoadPositions": "Falha ao carregar posicoes de staking"
 }
