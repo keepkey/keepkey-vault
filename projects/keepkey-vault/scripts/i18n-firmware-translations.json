@@ -9,12 +9,12 @@
     "Este KeepKey usa firmware que no es una versión oficial de KeepKey. Instalar firmware oficial borrará todas las claves y configuraciones."
   ],
   "pt": [
-    "Este KeepKey usa firmware {{from}} v{{current}}. O firmware {{to}} v{{target}} não consegue ler sua carteira e, ao iniciar, apagará todas as chaves e configurações. Para usar a carteira novamente, será preciso restaurá-la com a frase de recuperação.",
+    "Esta KeepKey usa firmware {{from}} v{{current}}. O firmware {{to}} v{{target}} não consegue ler sua carteira e, ao iniciar, apagará todas as chaves e configurações. Para usar a carteira novamente, será preciso restaurá-la com a frase de recuperação.",
     "Você está instalando v{{target}} sobre v{{current}}. O firmware antigo não consegue ler o armazenamento mais recente e, ao iniciar, apagará todas as chaves e configurações. Será preciso restaurar a carteira com a frase de recuperação.",
-    "Este KeepKey usa firmware somente Bitcoin. O firmware {{variant}} v{{target}} recusará a abertura desta carteira. Ela permanece no dispositivo, mas só poderá ser usada após reinstalar o firmware somente Bitcoin ou apagar o dispositivo e restaurá-la com a frase de recuperação.",
-    "No modo bootloader, não é possível identificar o firmware instalado. Instalar o firmware {{variant}} pode apagar todas as chaves e configurações, por exemplo ao trocar de variante ou substituir firmware não oficial ou mais recente. Se este KeepKey contém uma carteira, tenha a frase de recuperação em mãos. Um KeepKey novo não tem carteira a perder.",
-    "Este KeepKey não tem firmware instalado, por exemplo após uma atualização interrompida. Se continha uma carteira, instalar firmware a apagará e será preciso restaurá-la com a frase de recuperação.",
-    "Este KeepKey usa firmware que não é uma versão oficial da KeepKey. Instalar firmware oficial apagará todas as chaves e configurações."
+    "Esta KeepKey usa firmware somente Bitcoin. O firmware {{variant}} v{{target}} recusará a abertura desta carteira. Ela permanece no dispositivo, mas só poderá ser usada após reinstalar o firmware somente Bitcoin ou apagar o dispositivo e restaurá-la com a frase de recuperação.",
+    "No modo bootloader, não é possível identificar o firmware instalado. Instalar o firmware {{variant}} pode apagar todas as chaves e configurações, por exemplo ao trocar de variante ou substituir firmware não oficial ou mais recente. Se esta KeepKey contém uma carteira, tenha a frase de recuperação em mãos. Uma KeepKey nova não tem carteira a perder.",
+    "Esta KeepKey não tem firmware instalado, por exemplo após uma atualização interrompida. Se continha uma carteira, instalar firmware a apagará e será preciso restaurá-la com a frase de recuperação.",
+    "Esta KeepKey usa firmware que não é uma versão oficial da KeepKey. Instalar firmware oficial apagará todas as chaves e configurações."
   ],
   "fr": [
     "Ce KeepKey utilise le firmware {{from}} v{{current}}. Le firmware {{to}} v{{target}} ne peut pas lire son portefeuille et effacera toutes les clés et tous les réglages au démarrage. Pour réutiliser ce portefeuille, vous devrez le restaurer avec votre phrase de récupération.",

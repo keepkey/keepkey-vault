@@ -44,9 +44,9 @@ describe('describeSigningError with the real catalogs (audit v6 U7)', () => {
 			await i18n.loadNamespaces(['common', 'send', 'staking', 'names'])
 			for (const ns of ['send', 'staking', 'names'] as const) {
 				const t = i18n.getFixedT('pt', ns) as unknown as Parameters<typeof describeSigningError>[1]
-				expect(describeSigningError(new Error('Action cancelled by user'), t)).toBe('Transação cancelada no seu KeepKey.')
-				expect(describeSigningError(new Error('LIBUSB_ERROR_PIPE'), t)).toStartWith('Seu KeepKey parou de responder.')
-				expect(describeSigningError(new Error('Failure_Other'), t)).toBe('Failure_Other\n\nAinda falhando? Desconecte o KeepKey, conecte de novo, reinicie o app e tente outra vez.')
+				expect(describeSigningError(new Error('Action cancelled by user'), t)).toBe('Transação cancelada na sua KeepKey.')
+				expect(describeSigningError(new Error('LIBUSB_ERROR_PIPE'), t)).toStartWith('Sua KeepKey parou de responder.')
+				expect(describeSigningError(new Error('Failure_Other'), t)).toBe('Failure_Other\n\nAinda falhando? Desconecte a KeepKey, conecte de novo, reinicie o app e tente outra vez.')
 			}
 		} finally {
 			await i18n.changeLanguage(original)

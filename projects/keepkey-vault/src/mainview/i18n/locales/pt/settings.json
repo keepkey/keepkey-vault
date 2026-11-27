@@ -11,7 +11,7 @@
 	"fwHash": "Hash do FW",
 	"blHash": "Hash do BL",
 	"changeLabel": "Alterar rótulo",
-	"myKeepKey": "Meu KeepKey",
+	"myKeepKey": "Minha KeepKey",
 	"labelSaved": "Rótulo salvo",
 	"pingDevice": "Ping no dispositivo",
 	"pong": "Pong!",
@@ -98,7 +98,7 @@
 	"preReleaseUpdatesDesc": "Tenha acesso antecipado a novos recursos antes do lançamento estável",
 	"bip85": {
 		"title": "Sementes derivadas BIP85",
-		"warning": "As sementes derivadas podem ser recuperadas a partir da semente mestra do seu KeepKey. Elas são adequadas para carteiras quentes e uso diário — não para armazenamento frio.",
+		"warning": "As sementes derivadas podem ser recuperadas a partir da semente mestra da sua KeepKey. Elas são adequadas para carteiras quentes e uso diário — não para armazenamento frio.",
 		"wordCountLabel": "Número de palavras",
 		"indexLabel": "Índice de derivação",
 		"derive": "Derivar",
@@ -111,7 +111,7 @@
 		"copied": "Copiado!",
 		"dismiss": "Dispensar",
 		"autoClearNotice": "Limpeza automática em 60 segundos",
-		"confirmOnDevice": "Confirme no seu KeepKey...",
+		"confirmOnDevice": "Confirme na sua KeepKey...",
 		"derivationPath": "Caminho de derivação"
 	},
 	"mobile": {
@@ -122,9 +122,9 @@
 		"scanToDownload": "Escaneie para baixar na App Store",
 		"openAppStore": "Abrir na App Store",
 		"pairDevice": "Parear seu dispositivo",
-		"pairDescription": "Sincronize suas chaves públicas para ver os saldos no celular. As chaves privadas nunca saem do seu KeepKey.",
+		"pairDescription": "Sincronize suas chaves públicas para ver os saldos no celular. As chaves privadas nunca saem da sua KeepKey.",
 		"pairNow": "Parear dispositivo móvel",
-		"connectDevice": "Conecte o KeepKey para parear",
+		"connectDevice": "Conecte a KeepKey para parear",
 		"about": "O que é o KeepKey Mobile?",
 		"feature1": "Veja seu portfólio e saldos completos de qualquer lugar",
 		"feature2": "Receba endereços para todas as cadeias suportadas",

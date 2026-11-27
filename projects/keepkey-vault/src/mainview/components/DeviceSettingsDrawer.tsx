@@ -356,9 +356,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		try {
 			setAppSettings(await rpcRequest<AppSettings>('setPasswordManagerEnabled', { enabled }))
 			window.dispatchEvent(new Event('keepkey-settings-changed'))
-		} catch (e: any) { setPasswordsError(e?.message || 'Could not change password manager') }
+		} catch (e: any) {
+			// The bank's own errors are technical and in English ("Could not save the password bank"): keep them in the
+			// log and show the translated text.
+			console.error('[passwords] toggle failed:', e)
+			setPasswordsError(uiText('Could not change password manager'))
+		}
 		finally { setTogglingPasswords(false) }
-	}, [])
+	}, [uiText])
 	const [togglingPasskeys, setTogglingPasskeys] = useState(false)
 	const [passkeysError, setPasskeysError] = useState('')
 	const togglePasskeys = useCallback(async (enabled: boolean) => {
