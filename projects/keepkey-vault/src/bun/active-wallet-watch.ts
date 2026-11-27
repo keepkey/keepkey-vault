@@ -36,7 +36,7 @@ export async function refreshWatchedChain(hint: Hint, deps: {
   readBalance: (params: { chainId: string; forceRefresh: true }, isCurrent: () => boolean) => Promise<ChainBalance>
   readCachedBalance?: (chainId: string) => ChainBalance | undefined
   now?: () => number
-  scanHistory: (chainId: string, isCurrent: () => boolean) => Promise<{ rows: RecentActivity[]; error?: unknown }>
+  scanHistory: (chainId: string, isCurrent: () => boolean) => Promise<{ rows: RecentActivity[]; error?: unknown; partial?: boolean }>
   follow: (chainId: string, txid: string) => void
   retry: (chainId: string, txid?: string) => void
   onReceive: (chainId: string, txid: string) => void
@@ -68,6 +68,9 @@ export async function refreshWatchedChain(hint: Hint, deps: {
     const history = await deps.scanHistory(hint.chainId, isCurrent)
     assertCurrent()
     if (history.error || !Array.isArray(history.rows)) throw new Error('Wallet watch history could not be freshly verified')
+    // Partial history (KEEPKEY-207) is kept by the scan but never trusted here: no receive notice, no newer-activity
+    // shortcut, and the refresh fails so the event stays unprocessed and the chain retries with its backoff.
+    if (history.partial) throw new Error(`History is partial for ${hint.chainId}: kept what arrived, retrying for a fresh scan`)
     // History can reveal a payment missed while the app was closed. That is an
     // actual chain change, unlike a reconnect, and retires the quiet cached read.
     const newerActivity = reuseCached ? history.rows.filter(row => row.chainId === hint.chainId && !!row.txid

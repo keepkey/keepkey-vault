@@ -536,3 +536,32 @@ test('a new transaction arriving while quiet catchup history is in flight is dra
   expect(read.retries).toEqual(['arrived-during-catchup'])
   h.watcher.stop()
 })
+
+describe('KEEPKEY-207: partial history is kept by the scan but never trusted by the watch', () => {
+  test('a partial read never announces a payment, never takes the newer-activity shortcut, and fails the refresh', async () => {
+    const received: string[] = [], retries: string[] = [], activity: string[] = []
+    const deps: any = { readBalance: async () => ({ syncState: 'confirmed' }), follow: () => {}, retry: (chain: string) => retries.push(chain),
+      onReceive: (_chain: string, txid: string) => received.push(txid), onActivity: (_chain: string, txid?: string) => activity.push(txid || ''),
+      scanHistory: async () => ({ partial: true, rows: [{ chainId: 'litecoin', txid: 'native', type: 'receive', nativeReceiveVerified: true }] }) }
+    await expect(refreshWatchedChain({ chainId: 'litecoin', txids: ['native'], catchup: false }, deps, () => true)).rejects.toThrow('History is partial for litecoin')
+    expect(received).toEqual([])
+    expect(activity).toEqual([])
+    expect(retries).toEqual(['litecoin']) // the hinted tx is still followed up
+  })
+
+  test('the event behind a partial read stays unprocessed (replay kept) until a fresh scan succeeds', async () => {
+    const processed: string[][] = []
+    let partial = true
+    const h = harness(async () => { if (partial) throw new Error('History is partial for litecoin: kept what arrived, retrying for a fresh scan') },
+      { backoff: createChainBackoff({ jitter: 0 }), onProcessed: async (eventIds: string[]) => { processed.push(eventIds) } } as any)
+    h.watcher.add(watches); await h.tick()
+    emit(h.leases[0], 'tx:incoming', { address: watches[0].address, networkId: ltc.networkId, txid: 'native', eventId: 'evt-1', type: 'incoming' })
+    await h.tick() // the refresh reads partial history and fails
+    expect(h.refreshed.map(hint => hint.eventIds)).toEqual([['evt-1']])
+    expect(processed).toEqual([]) // evt-1 was not checkpointed: a replay still brings it back
+    partial = false
+    expect(await h.tick()).toBe(true) // the per-chain backoff retry runs with the same event
+    expect(processed).toEqual([['evt-1']])
+    h.watcher.stop()
+  })
+})

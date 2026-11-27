@@ -561,6 +561,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/swap-support-matrix.test.ts __tests__/swap-support-matrix-transition.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/portfolio-owner-confidence.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/activity-history-accounts.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/partial-history.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/selected-token-balance.test.ts __tests__/evm-owner-balance.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/evm-addresses-loading.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/asset-page-loading.test.ts

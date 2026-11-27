@@ -285,7 +285,7 @@ import { createWalletMonitorRegistry } from "./wallet-monitor-registry"
 import { createPioneerServerSwitch } from "./pioneer-server-switch"
 import { startEventStream, stopEventStream, type AddressEntry, type StreamEvent } from "./event-stream"
 import { pioneerSupportsDurableWalletMonitoring } from "../shared/pioneer-event-capabilities"
-import { rebuildActivityHistory, clearHistoryQueryCache } from "./activity-history"
+import { rebuildActivityHistory, clearHistoryQueryCache, partialHistoryMessage } from "./activity-history"
 import { isHistoryScanChain } from "./history-scan-eligibility"
 import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, watchOnlyNodeBalances, portfolioNativeMatch, confirmedPortfolioNativeMatches, trackedUtxoScriptPaths } from './watch-only-portfolio'
 import { cachedHistoryQueries, watchOnlyWalletScope, watchOnlyBitcoinScope } from './watch-only-history'
@@ -3648,6 +3648,18 @@ async function scanOneChain(chainId: string, forceRefresh = false, ownerIsCurren
 	if (!chainResult) throw new Error('Wallet history scan did not include the requested chain')
 	if (chainResult?.error) throw new Error(chainResult.error)
 	const rows = result.rows || []
+	if (chainResult.partial) {
+		// KEEPKEY-207: partial history was kept (stored rows never regress; a hidden session only gains rows it
+		// lacks, in RAM), but it is not a fresh scan. Callers that confirm, settle or notify (tx-watch, the wallet
+		// watch, onReceive) get an error, so they retry with their per-chain backoff instead of trusting it, and the
+		// wallet watch keeps the event unprocessed for replay.
+		if (hidden) {
+			const known = new Set(getSessionActivity().map(item => `${item.chainId || item.chain}:${item.txid || item.id}`))
+			addSessionActivity(rows.filter(row => !known.has(`${row.chainId || row.chain}:${row.txid || row.id}`)))
+		}
+		notifyActivityChanged()
+		throw new Error(partialHistoryMessage(chainId))
+	}
 	const added = hidden ? addSessionActivity(rows) : (chainResult?.inserted || 0)
 	notifyActivityChanged()
 	return { rows, added, txs: chainResult?.txs || 0, updated: chainResult?.updated || 0 }
@@ -10317,6 +10329,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					})
 					if (result.totals.failedChains) throw new Error(result.chains.find(c => c.error)?.error || 'History scan failed')
 					notifyActivityChanged()
+					if (result.totals.partialChains) throw new Error(partialHistoryMessage(chain.id))
 					return { count: result.totals.inserted }
 				}
 				const chain = getAllChains().find(c => c.id === params.chainId)
