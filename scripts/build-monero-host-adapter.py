@@ -72,6 +72,10 @@ WINDOWS_SYSTEM_DLLS = {"kernel32.dll", "advapi32.dll", "user32.dll", "ws2_32.dll
 # Import libraries for those DLLs, plus the static MinGW runtime pieces that -static links in.
 WINDOWS_LINK_LIBRARIES = {name[:-4] for name in WINDOWS_SYSTEM_DLLS} | {
     "uuid", "ntdll", "psapi", "userenv", "pthread", "m", "stdc++", "gcc", "gcc_eh", "mingwex", "mingw32", "moldname"}
+# Core's own intermediate link of this target pulls in MSYS2 static libraries (unbound
+# built against a newer OpenSSL). That binary is discarded; only the rewritten final
+# link ships, and it never carries this flag, so a real missing symbol still fails it.
+INTERMEDIATE_ONLY = "-Wl,--unresolved-symbols=ignore-all"
 WINDOWS_TOOLCHAIN_PACKAGES = ("mingw-w64-ucrt-x86_64-", "make ", "perl ")
 
 
@@ -107,6 +111,8 @@ def windows_link_command(cache, target_name, work):
         expanded += shlex.split((cache / arg[1:]).read_text()) if arg.startswith("@") else [arg]
     command, dropped, inside = [], [], Path(work).resolve()
     for arg in expanded:
+        if arg == INTERMEDIATE_ONLY:
+            continue
         library = None
         if arg.startswith("-l"):
             library = arg[2:]
@@ -152,7 +158,7 @@ def build_windows(work, output, jobs, run, artifact, adapter, core, boost, sodiu
         ' add_executable(monero_host_adapter "' + posix(adapter) + '")',
         " target_link_libraries(monero_host_adapter PRIVATE wallet version)",
         ' set_target_properties(monero_host_adapter PROPERTIES CXX_STANDARD 14 OUTPUT_NAME monero-host-adapter RUNTIME_OUTPUT_DIRECTORY "' + posix(work / "intermediate") + '")',
-        " target_link_options(monero_host_adapter PRIVATE -static -static-libgcc -static-libstdc++ -Wl,--gc-sections -Wl,--no-insert-timestamp)",
+        " target_link_options(monero_host_adapter PRIVATE -static -static-libgcc -static-libstdc++ -Wl,--gc-sections -Wl,--no-insert-timestamp " + INTERMEDIATE_ONLY + ")",
         "endfunction()", "cmake_language(DEFER CALL keepkey_host_adapter)", ""]))
     cache = work / "core-build"
     mappings = " ".join(sections + [prefix, "-ffile-prefix-map=" + posix(NATIVE) + "=/monero-host-adapter-source"])
