@@ -8,7 +8,7 @@
     "path": "projects/keepkey-vault/native/monero-host-adapter/host-adapter.cpp",
     "sha256": "86e82c7d3fa215eb472c886e97e0e89fc2116801ea4c34fdc58512e6803592f3",
     "buildScriptPath": "scripts/build-monero-host-adapter.py",
-    "buildScriptSha256": "31ba6467537fc1bd7de4c702e5cbf24dafc488a26789424797d49ac11436272a",
+    "buildScriptSha256": "9c52927b0345bddaf278d76b8d3e7c1455bdf829239b2ae9d374d97a2292fc67",
     "coreCommit": "85f036ba7019cd36f08e8a38a27c37ea7b522618",
     "archivesSha256": {
       "monero-core-v0.18.5.4.tar.gz": "a9514399f085a05101c84bf905bc17eae96db2215922f8023b492795259c215f",
