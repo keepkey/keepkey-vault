@@ -1,8 +1,8 @@
 {
-	"title": "Configuração do KeepKey",
+	"title": "Configuração da KeepKey",
 	"subtitle": "Carteira de hardware multi-chain segura",
 	"stepDescriptions": {
-		"welcome": "Bem-vindo ao KeepKey",
+		"welcome": "Bem-vindo à KeepKey",
 		"bootloader": "Verificar e atualizar bootloader",
 		"firmware": "Verificar e atualizar firmware",
 		"initChoose": "Escolha seu método de configuração",
@@ -22,9 +22,9 @@
 		"setup": "Configuração"
 	},
 	"welcome": {
-		"title": "Bem-vindo ao KeepKey",
+		"title": "Bem-vindo à KeepKey",
 		"oobTitle": "Novo dispositivo detectado",
-		"oobWelcome": "Bem-vindo ao KeepKey",
+		"oobWelcome": "Bem-vindo à KeepKey",
 		"oobWizardDesc": "Este assistente irá guiá-lo pelas atualizações do bootloader e firmware para deixar seu dispositivo pronto.",
 		"oobIntro": "Vamos atualizar seu firmware e configurar sua carteira.",
 		"intro": "Vamos configurar sua carteira de hardware.",
@@ -34,11 +34,11 @@
 		"readMore": "Como funciona?",
 		"readMoreTitle": "Como funciona?",
 		"readMoreBootloaderTitle": "O que é o bootloader?",
-		"readMoreBootloaderBody": "O bootloader é um pequeno programa que roda primeiro quando seu KeepKey liga. Pense nele como um guarda de segurança — ele verifica se o software principal do seu dispositivo é autêntico e não foi adulterado antes de permitir sua execução.",
+		"readMoreBootloaderBody": "O bootloader é um pequeno programa que roda primeiro quando sua KeepKey liga. Pense nele como um guarda de segurança — ele verifica se o software principal do seu dispositivo é autêntico e não foi adulterado antes de permitir sua execução.",
 		"readMoreFirmwareTitle": "O que é firmware?",
-		"readMoreFirmwareBody": "O firmware é o software principal que seu KeepKey usa para gerenciar suas criptomoedas. Ele cuida de tudo, desde gerar endereços até assinar transações. Atualizá-lo traz os recursos e correções de segurança mais recentes.",
+		"readMoreFirmwareBody": "O firmware é o software principal que sua KeepKey usa para gerenciar suas criptomoedas. Ele cuida de tudo, desde gerar endereços até assinar transações. Atualizá-lo traz os recursos e correções de segurança mais recentes.",
 		"readMoreWhyTitle": "Por que atualizar ambos?",
-		"readMoreWhyBody": "Atualizar o bootloader bloqueia seu dispositivo para aceitar apenas software oficial do KeepKey — então, mesmo que alguém tentasse instalar algo malicioso, seu dispositivo o rejeitaria. Juntos, o bootloader e o firmware mantêm seus fundos seguros.",
+		"readMoreWhyBody": "Atualizar o bootloader bloqueia seu dispositivo para aceitar apenas software oficial da KeepKey — então, mesmo que alguém tentasse instalar algo malicioso, seu dispositivo o rejeitaria. Juntos, o bootloader e o firmware mantêm seus fundos seguros.",
 		"gotIt": "Entendi"
 	},
 	"bootloader": {
@@ -56,18 +56,18 @@
 		"updateFailed": "Atualização falhou",
 		"tryAgain": "Tentar novamente",
 		"enterFirmwareUpdateMode": "Entrar no modo de atualização de firmware",
-		"step1Unplug": "Desconecte seu KeepKey",
+		"step1Unplug": "Desconecte sua KeepKey",
 		"step2Hold": "Segure o botão do dispositivo",
 		"step3Plugin": "Enquanto segura, conecte o cabo USB",
 		"step4Release": "Solte quando a tela do bootloader aparecer",
 		"listeningForBootloader": "Aguardando dispositivo no modo bootloader...",
 		"readyDetectBootloader": "Estou pronto — Detectar Bootloader",
 		"skipBootloaderUpdate": "Pular atualização do bootloader",
-		"verifyBackupHint": "O KeepKey perguntará se você tem sua frase de recuperação caso as chaves privadas sejam apagadas. Segurar o botão responde sim e inicia a atualização — confirme apenas se você tiver sua frase de recuperação anotada.",
+		"verifyBackupHint": "A KeepKey perguntará se você tem sua frase de recuperação caso as chaves privadas sejam apagadas. Segurar o botão responde sim e inicia a atualização — confirme apenas se você tiver sua frase de recuperação anotada.",
 		"followDirectionsOnDevice": "Siga as instruções no dispositivo",
-		"deviceWillGuide": "Seu KeepKey irá guiá-lo pelo processo de atualização.",
+		"deviceWillGuide": "Sua KeepKey irá guiá-lo pelo processo de atualização.",
 		"bootloaderDetected": "Modo Bootloader detectado",
-		"deviceReadyForUpdate": "Seu KeepKey está no modo bootloader e pronto para atualização.",
+		"deviceReadyForUpdate": "Sua KeepKey está no modo bootloader e pronta para atualização.",
 		"updateBootloaderTo": "Atualizar Bootloader para v{{version}}",
 		"doNotHoldButton": "NÃO mantenha o botão pressionado ao reconectar. Apenas conecte normalmente. Manter o botão pressionado colocará o dispositivo de volta no modo bootloader.",
 		"followDeviceTitle": "Siga as instruções na sua KeepKey",
@@ -89,19 +89,19 @@
 		"updatingFirmware": "Atualizando firmware...",
 		"doNotUnplug": "NÃO desconecte seu dispositivo.",
 		"deviceRebooting": "Dispositivo reiniciando...",
-		"rebootingMessage": "Seu KeepKey está reiniciando com o novo firmware. Por favor aguarde...",
+		"rebootingMessage": "Sua KeepKey está reiniciando com o novo firmware. Por favor aguarde...",
 		"firmwareVerified": "Firmware verificado como versão oficial",
 		"firmwareHashNotFound": "Hash do firmware não encontrado no manifesto",
 		"updateFirmwareTo": "Atualizar Firmware para v{{version}}",
 		"skipUpdate": "Pular atualização",
 		"confirmOnDevice": "Confirme a ação no dispositivo!",
-		"lookAtDeviceAndPress": "Olhe para a tela do seu KeepKey e pressione o botão para confirmar.",
+		"lookAtDeviceAndPress": "Olhe para a tela da sua KeepKey e pressione o botão para confirmar.",
 		"verifyBackupNote": "Se seu dispositivo não estiver configurado, você pode ignorar com segurança qualquer tela de \"verificar backup\".",
 		"uploadingFirmware": "Enviando firmware... Não desconecte seu dispositivo",
 		"estimatedTimeRemaining": "Tempo estimado restante: {{seconds}}s",
 		"deviceWillRestart": "Seu dispositivo reiniciará quando concluído.",
 		"skipWarning": "Você pode continuar com firmware mais antigo. Alguns recursos podem não funcionar como esperado.",
-		"bootloaderReadyForFirmware": "Seu KeepKey está no modo bootloader e pronto para o firmware.",
+		"bootloaderReadyForFirmware": "Sua KeepKey está no modo bootloader e pronta para o firmware.",
 		"installLatestFirmware": "Instalar Firmware Oficial v{{version}}",
 		"orCustomFirmware": "Ou instalar firmware personalizado",
 		"customFirmwareHint": "Selecione um arquivo de firmware .bin do seu computador ou arraste e solte em qualquer lugar.",
@@ -118,35 +118,35 @@
 		"customFlashFailed": "Falha ao gravar firmware personalizado",
 		"rebootTakingLong": "A reconexão está demorando mais que o normal...",
 		"rebootTakingLongSub": "O dispositivo pode precisar de um momento para reiniciar.",
-		"pleaseDisconnect": "Desconecte e reconecte seu KeepKey",
+		"pleaseDisconnect": "Desconecte e reconecte sua KeepKey",
 		"disconnectMessage": "Seu dispositivo mostra \"Atualização de firmware concluída\". Desconecte o cabo USB e reconecte para continuar.",
 		"stillWaitingDisconnect": "Ainda aguardando — certifique-se de desconectar e reconectar o cabo USB.",
 		"manualReconnectTitle": "Dispositivo não reconecta?",
-		"manualReconnectStep1": "1. Desconecte seu KeepKey",
+		"manualReconnectStep1": "1. Desconecte sua KeepKey",
 		"manualReconnectStep2": "2. Aguarde 5 segundos",
 		"manualReconnectStep3": "3. Conecte novamente",
 		"manualReconnectNote": "A configuração continuará automaticamente quando o dispositivo for detectado.",
 		"unsignedBootloaderWarning": "Você está instalando firmware não assinado (de desenvolvedor). Se este dispositivo estava executando firmware assinado (oficial), todos os dados serão apagados. Este é um limite de segurança imposto pelo hardware; o mesmo vale ao voltar para firmware assinado.",
 		"unsignedBootloaderAcknowledge": "Entendo que isso pode apagar o dispositivo e tenho backup da minha seed",
 		"autoRebooting": "Seu dispositivo está reiniciando...",
-		"autoRebootingDetail": "Seu KeepKey reiniciará automaticamente com o novo firmware. Isso geralmente leva alguns segundos.",
+		"autoRebootingDetail": "Sua KeepKey reiniciará automaticamente com o novo firmware. Isso geralmente leva alguns segundos.",
 		"waitingForDevice": "Aguardando seu dispositivo...",
 		"wipeAndFlash": "Apagar e instalar",
 		"installWipe": {
 			"wipeTitle": "Isso apagará o dispositivo",
 			"unknownTitle": "Isso pode apagar o dispositivo",
 			"lockTitle": "Isso bloqueará sua carteira somente Bitcoin",
-			"noFirmwareTitle": "Qualquer carteira neste KeepKey será apagada",
+			"noFirmwareTitle": "Qualquer carteira nesta KeepKey será apagada",
 			"wipeAck": "Entendo que isso apagará meu dispositivo e tenho uma cópia de segurança da minha frase de recuperação",
 			"unknownAck": "Entendo que isso pode apagar meu dispositivo e tenho uma cópia de segurança da minha frase de recuperação",
 			"lockAck": "Entendo que minha carteira será bloqueada e tenho uma cópia de segurança da minha frase de recuperação",
 			"downgradeTitle": "Isso apagará o dispositivo",
-			"crossBody": "Este KeepKey usa firmware {{from}} v{{current}}. O firmware {{to}} v{{target}} não consegue ler sua carteira e, ao iniciar, apagará todas as chaves e configurações. Para usar a carteira novamente, será preciso restaurá-la com a frase de recuperação.",
+			"crossBody": "Esta KeepKey usa firmware {{from}} v{{current}}. O firmware {{to}} v{{target}} não consegue ler sua carteira e, ao iniciar, apagará todas as chaves e configurações. Para usar a carteira novamente, será preciso restaurá-la com a frase de recuperação.",
 			"downgradeBody": "Você está instalando v{{target}} sobre v{{current}}. O firmware antigo não consegue ler o armazenamento mais recente e, ao iniciar, apagará todas as chaves e configurações. Será preciso restaurar a carteira com a frase de recuperação.",
-			"lockBody": "Este KeepKey usa firmware somente Bitcoin. O firmware {{variant}} v{{target}} recusará a abertura desta carteira. Ela permanece no dispositivo, mas só poderá ser usada após reinstalar o firmware somente Bitcoin ou apagar o dispositivo e restaurá-la com a frase de recuperação.",
-			"unknownBody": "No modo bootloader, não é possível identificar o firmware instalado. Instalar o firmware {{variant}} pode apagar todas as chaves e configurações, por exemplo ao trocar de variante ou substituir firmware não oficial ou mais recente. Se este KeepKey contém uma carteira, tenha a frase de recuperação em mãos. Um KeepKey novo não tem carteira a perder.",
-			"noFirmwareBody": "Este KeepKey não tem firmware instalado, por exemplo após uma atualização interrompida. Se continha uma carteira, instalar firmware a apagará e será preciso restaurá-la com a frase de recuperação.",
-			"unsignedBody": "Este KeepKey usa firmware que não é uma versão oficial da KeepKey. Instalar firmware oficial apagará todas as chaves e configurações."
+			"lockBody": "Esta KeepKey usa firmware somente Bitcoin. O firmware {{variant}} v{{target}} recusará a abertura desta carteira. Ela permanece no dispositivo, mas só poderá ser usada após reinstalar o firmware somente Bitcoin ou apagar o dispositivo e restaurá-la com a frase de recuperação.",
+			"unknownBody": "No modo bootloader, não é possível identificar o firmware instalado. Instalar o firmware {{variant}} pode apagar todas as chaves e configurações, por exemplo ao trocar de variante ou substituir firmware não oficial ou mais recente. Se esta KeepKey contém uma carteira, tenha a frase de recuperação em mãos. Uma KeepKey nova não tem carteira a perder.",
+			"noFirmwareBody": "Esta KeepKey não tem firmware instalado, por exemplo após uma atualização interrompida. Se continha uma carteira, instalar firmware a apagará e será preciso restaurá-la com a frase de recuperação.",
+			"unsignedBody": "Esta KeepKey usa firmware que não é uma versão oficial da KeepKey. Instalar firmware oficial apagará todas as chaves e configurações."
 		},
 		"whyUpdate": "As atualizações corrigem problemas de segurança e adicionam suporte a novas moedas e recursos.",
 		"skipForNow": "Pular por enquanto",
@@ -158,7 +158,7 @@
 	},
 	"initChoose": {
 		"title": "Configure sua carteira",
-		"description": "Escolha como configurar seu KeepKey",
+		"description": "Escolha como configurar sua KeepKey",
 		"createNewWallet": "Criar nova carteira",
 		"createDescription": "Gerar uma nova frase semente no seu dispositivo",
 		"createWallet": "Criar carteira",
@@ -182,10 +182,10 @@
 	"initProgress": {
 		"creatingWallet": "Criando carteira...",
 		"recoveringWallet": "Recuperando carteira...",
-		"followPromptsCreate": "Siga as instruções na tela do seu KeepKey. Anote as palavras semente cuidadosamente — elas são seu backup.",
-		"followPromptsRecover": "Siga as instruções na tela do seu KeepKey. Insira sua frase semente de recuperação usando o dispositivo.",
-		"followPrompts": "Siga as instruções na tela do seu KeepKey.",
-		"lookAtDevice": "Olhe para o seu KeepKey e siga as instruções na tela.",
+		"followPromptsCreate": "Siga as instruções na tela da sua KeepKey. Anote as palavras semente cuidadosamente — elas são seu backup.",
+		"followPromptsRecover": "Siga as instruções na tela da sua KeepKey. Insira sua frase semente de recuperação usando o dispositivo.",
+		"followPrompts": "Siga as instruções na tela da sua KeepKey.",
+		"lookAtDevice": "Olhe para a sua KeepKey e siga as instruções na tela.",
 		"failedToCreate": "Falha ao criar a carteira",
 		"failedToRecover": "Falha ao recuperar a carteira",
 		"writeDownWarning": "Anote cada palavra!",
@@ -202,8 +202,8 @@
 	"initLabel": {
 		"walletCreated": "Carteira criada!",
 		"walletRecovered": "Carteira recuperada!",
-		"giveAName": "Dê ao seu KeepKey um nome amigável para identificá-lo facilmente",
-		"placeholder": "Meu KeepKey",
+		"giveAName": "Dê à sua KeepKey um nome amigável para identificá-la facilmente",
+		"placeholder": "Minha KeepKey",
 		"setDeviceName": "Definir nome do dispositivo",
 		"skipForNow": "Pular por agora",
 		"writeDownReminder": "Confirme que sua frase de recuperação está anotada em papel antes de continuar — essas palavras não serão mostradas novamente."
@@ -211,10 +211,10 @@
 	"complete": {
 		"walletCreated": "Carteira criada!",
 		"walletRecovered": "Carteira recuperada!",
-		"deviceReady": "Seu KeepKey{{label}} está pronto",
+		"deviceReady": "Sua KeepKey{{label}} está pronta",
 		"recoveredDescription": "Sua carteira foi restaurada com sucesso a partir da frase de recuperação",
 		"createdDescription": "Sua nova carteira está segura e pronta para uso",
-		"startUsing": "Começar a usar o KeepKey"
+		"startUsing": "Começar a usar a KeepKey"
 	},
 	"footer": {
 		"stepOf": "Passo {{current}} de {{total}}",
@@ -234,7 +234,7 @@
 		"checkWords": "Conferir palavras",
 		"verifying": "Verificando...",
 		"checkingAnswers": "Conferindo suas respostas...",
-		"followDevice": "Siga as instruções no KeepKey para inserir as palavras solicitadas.",
+		"followDevice": "Siga as instruções na KeepKey para inserir as palavras solicitadas.",
 		"verified": "Frase de recuperação verificada!",
 		"verifiedDetail": "Seu backup está correto. Guarde-o com segurança e nunca compartilhe com ninguém.",
 		"continue": "Continuar",
@@ -246,7 +246,7 @@
 		"cards": {
 			"pin": {
 				"title": "Seu PIN é embaralhado",
-				"body": "Seu KeepKey mostra uma grade numérica aleatória. Combine as posições na tela com os números no dispositivo. O layout muda toda vez para que observadores não roubem seu PIN."
+				"body": "Sua KeepKey mostra uma grade numérica aleatória. Combine as posições na tela com os números no dispositivo. O layout muda toda vez para que observadores não roubem seu PIN."
 			},
 			"words": {
 				"title": "Suas palavras = sua carteira",
@@ -254,11 +254,11 @@
 			},
 			"recovery": {
 				"title": "Entrada de recuperação embaralhada",
-				"body": "Ao recuperar, o KeepKey embaralha o alfabeto na tela do dispositivo. Você insere palavras por posição, nunca digitando as letras reais. Keyloggers não veem nada útil."
+				"body": "Ao recuperar, a KeepKey embaralha o alfabeto na tela do dispositivo. Você insere palavras por posição, nunca digitando as letras reais. Keyloggers não veem nada útil."
 			},
 			"deviceScreen": {
 				"title": "Confie na tela do dispositivo",
-				"body": "Sempre confirme o endereço e o valor no KeepKey antes de aprovar. Seu computador pode estar comprometido; a tela do dispositivo não. Especialmente em transações grandes."
+				"body": "Sempre confirme o endereço e o valor na KeepKey antes de aprovar. Seu computador pode estar comprometido; a tela do dispositivo não. Especialmente em transações grandes."
 			},
 			"appConnections": {
 				"title": "Conexões de apps estão desligadas",

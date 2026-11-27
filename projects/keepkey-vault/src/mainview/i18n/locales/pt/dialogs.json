@@ -54,8 +54,8 @@
 	},
 	"apiBridge": {
 		"title": "Ponte API necessária",
-		"descriptionEnabled": "Este app se comunica com seu KeepKey através da ponte API local (porta 1646). Clique abaixo para verificar a conexão e continuar.",
-		"descriptionDisabled": "Este app se comunica com seu KeepKey através da ponte API local (porta 1646). A ponte está atualmente desativada.",
+		"descriptionEnabled": "Este app se comunica com sua KeepKey através da ponte API local (porta 1646). Clique abaixo para verificar a conexão e continuar.",
+		"descriptionDisabled": "Este app se comunica com sua KeepKey através da ponte API local (porta 1646). A ponte está atualmente desativada.",
 		"enablePrompt": "Ative-a para continuar. Você pode desativá-la a qualquer momento em",
 		"settingsApplication": "Configurações → Aplicativo",
 		"connecting": "Conectando...",

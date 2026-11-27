@@ -32,7 +32,7 @@
 	"staleCtaTitle": "Pressione para atualizar saldos",
 	"staleCtaSubtitle": "Última verificação {{time}}",
 	"loadingDashboardTitle": "Carregando painel",
-	"loadingConnect": "Conectando ao seu KeepKey",
+	"loadingConnect": "Conectando à sua KeepKey",
 	"loadingSync": "Sincronizando saldos entre redes",
 	"loadingPrices": "Buscando os preços mais recentes",
 	"tokensCount": "+{{count}} tokens",
