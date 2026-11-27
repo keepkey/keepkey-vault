@@ -164,6 +164,6 @@ Do not install macOS on the Linux box. The `macos-15-intel` runner covers this. 
 - No releases and no tags. In particular, do not add assets to `monero-native-*` releases.
 - Never ellipsize hashes or addresses, in docs, logs or on the device.
 - Never read or edit `.env`. Ask the owner for credentials.
-- No mocks. Unpinned means Monero is unavailable with a warning, never a fake helper.
+- No mocks. Before the pins exist, Monero still shows (no platform gate) and signing fails with a real error; never a fake helper.
 - Use `make` targets only.
 - Copilot reviews only with the owner's OK.
