@@ -4,7 +4,8 @@
  * it lands in a block, and nothing keeps polling after it settles.
  */
 import { describe, test, expect } from 'bun:test'
-import { createTxWatch, RESCAN_DELAYS_MS, UNSEEN_GIVE_UP_MS } from '../src/bun/tx-watch'
+import { createTxWatch, MAX_WATCH_MS, RESCAN_DELAYS_MS, UNSEEN_GIVE_UP_MS } from '../src/bun/tx-watch'
+import { CHAIN_RETRY_DELAYS_MS, createChainBackoff } from '../src/bun/chain-backoff'
 import type { RecentActivity } from '../src/shared/types'
 
 const row = (txid: string, confirmations?: number): RecentActivity => ({
@@ -17,8 +18,12 @@ function harness(scanChain: (chainId: string) => Promise<RecentActivity[]>) {
   let clock = 0
   const timers: Timer[] = []
   const confirmed: string[] = []
+  const logs: string[] = []
+  const forced: boolean[] = []
   const w = createTxWatch({
-    scanChain,
+    scanChain: (chainId, _txids, options) => { forced.push(options?.forceRefresh ?? true); return scanChain(chainId) },
+    backoff: createChainBackoff({ jitter: 0 }), // exact delays
+    log: message => logs.push(message),
     onConfirmed: (chainId, txid) => confirmed.push(`${chainId}:${txid}`),
     requiredConfs: () => 6,
     setTimer: (fn, ms) => { const t: Timer = { fn, due: clock + ms }; timers.push(t); return t },
@@ -37,7 +42,7 @@ function harness(scanChain: (chainId: string) => Promise<RecentActivity[]>) {
     await flush()
     return delay
   }
-  return { w, tick, flush, confirmed, advance: (ms: number) => { clock += ms } }
+  return { w, tick, flush, confirmed, logs, forced, advance: (ms: number) => { clock += ms } }
 }
 
 function scripted(results: Array<RecentActivity[] | Error>) {
@@ -88,7 +93,7 @@ describe('tx-watch', () => {
     h.w.watch('bitcoin', 'd')
     expect(await h.tick()).toBe(RESCAN_DELAYS_MS[0])
     expect(h.w.size()).toBe(1)
-    expect(await h.tick()).toBe(RESCAN_DELAYS_MS[1])
+    expect(await h.tick()).toBe(CHAIN_RETRY_DELAYS_MS[0]) // first failure: the backoff's first delay
     expect(h.confirmed).toEqual(['bitcoin:d'])
     expect(h.w.size()).toBe(0)
   })
@@ -131,5 +136,96 @@ describe('tx-watch', () => {
     await h.tick() // unseen → next scan queued at +15s
     h.w.watch('bitcoin', 'g')
     expect(await h.tick()).toBe(RESCAN_DELAYS_MS[0])
+  })
+
+  // KEEPKEY-207: a chain whose rescan keeps failing backs off instead of being asked again every minute.
+  describe('backoff after a failed rescan', () => {
+    const down = (n: number) => Array.from({ length: n }, () => new Error('History response is incomplete or stale'))
+
+    test('consecutive failures wait longer each time, up to the cap, and log once', async () => {
+      const h = harness(scripted(down(7)))
+      h.w.watch('bitcoin', 'a')
+      expect(await h.tick()).toBe(RESCAN_DELAYS_MS[0])
+      const waits: number[] = []
+      for (let i = 0; i < 6; i++) waits.push((await h.tick())!)
+      expect(waits).toEqual([5_000, 15_000, 30_000, 60_000, 120_000, 120_000])
+      expect(h.logs).toHaveLength(1)
+      expect(h.logs[0]).toContain('bitcoin rescan failed')
+      expect(h.w.size()).toBe(1) // failures never settle or drop the tx
+    })
+
+    test('poke() and a new watch() do not cut a backing-off chain short', async () => {
+      const h = harness(scripted(down(4)))
+      h.w.watch('bitcoin', 'a')
+      for (let i = 0; i < 4; i++) await h.tick() // 4 failures: next retry in 60 s
+      h.w.poke('bitcoin')
+      h.w.watch('bitcoin', 'b')
+      expect(await h.tick()).toBe(CHAIN_RETRY_DELAYS_MS[3])
+    })
+
+    test('no forced cache bypass while backing off; success brings back the normal pace', async () => {
+      const h = harness(scripted([...down(3), [], [], [row('a', 6)]]))
+      h.w.watch('bitcoin', 'a')
+      for (let i = 0; i < 3; i++) await h.tick()
+      expect(await h.tick()).toBe(CHAIN_RETRY_DELAYS_MS[2]) // 4th scan succeeds after 30 s
+      expect(h.forced).toEqual([true, false, false, false])
+      expect(h.logs.at(-1)).toContain('bitcoin rescan recovered after 3 failure(s)')
+      expect(await h.tick()).toBe(RESCAN_DELAYS_MS[1]) // healthy again: the normal ladder, forced again
+      expect(h.forced.at(-1)).toBe(true)
+      expect(await h.tick()).toBe(RESCAN_DELAYS_MS[2])
+      expect(h.confirmed).toEqual(['bitcoin:a'])
+      expect(h.w.size()).toBe(0)
+    })
+
+    test('an outage does not use up the time to see an unseen tx', async () => {
+      const h = harness(scripted([...down(1), []]))
+      h.w.watch('bitcoin', 'a')
+      await h.tick()                  // fails at 5 s
+      h.advance(UNSEEN_GIVE_UP_MS)    // provider down for 15 min
+      await h.tick()                  // first good scan: not seen yet, but the outage did not count
+      expect(h.w.size()).toBe(1)
+      h.advance(UNSEEN_GIVE_UP_MS)    // 15 min of healthy scans without seeing it
+      await h.tick()
+      expect(h.w.size()).toBe(0)
+    })
+
+    test('a chain that never recovers stops being watched after the 3 h hard stop', async () => {
+      const h = harness(async () => { throw new Error('TRON history failed (429)') })
+      h.w.watch('bitcoin', 'a')
+      await h.tick()
+      h.advance(MAX_WATCH_MS)
+      await h.tick()
+      expect(h.w.size()).toBe(0)
+      expect(await h.tick()).toBeNull()
+    })
+
+    test('after the hard stop ends the last watch, a later tx on that chain starts fresh', async () => {
+      let failing = true
+      const h = harness(async () => { if (failing) throw new Error('TRON history failed (429)'); return [] })
+      h.w.watch('bitcoin', 'old')
+      for (let i = 0; i < 5; i++) await h.tick() // backing off at the longest delay
+      h.advance(MAX_WATCH_MS)
+      await h.tick()                             // hard stop: the chain has no watch left
+      expect(h.w.size()).toBe(0)
+      h.advance(60 * 60_000)                     // an hour later the provider is back and a new tx is sent
+      failing = false
+      h.w.watch('bitcoin', 'new')
+      expect(await h.tick()).toBe(RESCAN_DELAYS_MS[0]) // not the 120 s backoff
+      expect(h.forced.at(-1)).toBe(true)
+      expect(h.logs.some(line => line.includes('recovered'))).toBe(false) // no outage added to the new tx's clock
+      h.advance(UNSEEN_GIVE_UP_MS)
+      await h.tick()
+      expect(h.w.size()).toBe(0) // gives up after its own 15 min, not 15 min plus the old outage
+    })
+
+    test('clear() forgets the backoff: the next session starts at the normal pace', async () => {
+      const h = harness(scripted([...down(4), []]))
+      h.w.watch('bitcoin', 'a')
+      for (let i = 0; i < 4; i++) await h.tick()
+      h.w.clear()
+      h.w.watch('bitcoin', 'b')
+      expect(await h.tick()).toBe(RESCAN_DELAYS_MS[0])
+      expect(h.forced.at(-1)).toBe(true)
+    })
   })
 })
