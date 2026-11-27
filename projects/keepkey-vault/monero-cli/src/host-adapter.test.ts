@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { checkHostAdapterFile, hostAdapterArtifact, verifiedHostAdapterIn } from './host-adapter'
-import { runHostAdapter, verifiedHostAdapter } from './tools'
+import { hostAdapterEnvironment, runHostAdapter, verifiedHostAdapter } from './tools'
 import { parseExactJson, PublicError, validateOutputs, validatePlan, validateTransferDraft } from './protocol'
 import { MoneroWatchService } from './wallet'
 import { stageMoneroAdapter } from '../../scripts/stage-monero-adapter'
@@ -18,13 +18,28 @@ const metadata = (directory: string, extra = {}) => writeFileSync(join(directory
 afterEach(() => { for (const path of folders.splice(0)) rmSync(path, { recursive: true, force: true }) })
 
 describe('Monero host adapter admission', () => {
+  test('the decoder inherits no environment; Windows receives only a plain SystemRoot path', () => {
+    expect(hostAdapterEnvironment('darwin', 'C:/Windows')).toEqual({})
+    expect(hostAdapterEnvironment('linux', 'C:/Windows')).toEqual({})
+    const windows = String.raw`C:\Windows`
+    expect(hostAdapterEnvironment('win32', windows)).toEqual({ SystemRoot: windows })
+    expect(hostAdapterEnvironment('win32', '')).toEqual({})
+    expect(hostAdapterEnvironment('win32', 'relative')).toEqual({})
+    expect(hostAdapterEnvironment('win32', String.raw`C:\Windows" & calc`)).toEqual({})
+  })
+
+  // ponytail: skipped until the reviewed win32-x64 pin lands, so it never passes vacuously.
+  test.skipIf(!hostAdapterArtifact('win32-x64'))('the Windows pin names the adapter with .exe', () => {
+    expect(hostAdapterArtifact('win32-x64')!.filename).toBe('monero-host-adapter.exe')
+  })
+
   test('optional absence is explicit; required absence and a supplied wrong pin fail', () => {
     const directory = folder()
     expect(stageMoneroAdapter({ directory, platform: 'darwin-arm64', ifAvailable: true }).staged).toBe(false)
     expect(() => stageMoneroAdapter({ directory, platform: 'darwin-arm64' })).toThrow('reviewed bytes')
     expect(() => stageMoneroAdapter({ directory, platform: 'darwin-arm64', sha256: '0'.repeat(64), ifAvailable: true })).toThrow('reviewed platform pin')
-    expect(stageMoneroAdapter({ directory, platform: 'win32-x64', ifAvailable: true }).staged).toBe(false)
-    expect(() => stageMoneroAdapter({ directory, platform: 'win32-x64' })).toThrow('No reviewed')
+    expect(stageMoneroAdapter({ directory, platform: 'linux-x64', ifAvailable: true }).staged).toBe(false)
+    expect(() => stageMoneroAdapter({ directory, platform: 'linux-x64' })).toThrow('No reviewed')
   })
 
   test('corrupt bytes are rejected even in optional mode; metadata cannot approve another executable', async () => {
@@ -53,7 +68,9 @@ describe('Monero host adapter admission', () => {
 // device, signing or relay. The request credentials are published upstream test data.
 const toolsDirectory = resolve(import.meta.dir, '../vendor', `${process.platform}-${process.arch}`)
 const nativeSource = process.env.KEEPKEY_TEST_MONERO_HOST_ADAPTER || verifiedHostAdapterIn(toolsDirectory)
-const artifact = hostAdapterArtifact()
+// The reviewed decoder for this host (darwin-arm64 on the Mac CI, win32-x64 on Windows).
+const hostPlatform = `${process.platform}-${process.arch}`
+const artifact = hostAdapterArtifact(hostPlatform)
 const nativeAvailable = !!(nativeSource && artifact && checkHostAdapterFile(nativeSource, artifact))
 const sweepCases = ['sweep-standard-dummy-first', 'sweep-standard-dummy-last', 'sweep-subaddress-dummy-first', 'sweep-subaddress-dummy-last'] as const
 const requestFixture = (name: string): Record<string, string> => JSON.parse(readFileSync(resolve(import.meta.dir, '../fixtures/host-adapter', `${name}-request.json`), 'utf8'))
@@ -65,28 +82,29 @@ function expectedSweepPlan(name: typeof sweepCases[number]) {
 }
 describe.skipIf(!nativeAvailable)('reviewed native Monero decoder (public fixtures)', () => {
   test('stages independently of an emulator flag and remains usable beside wallet RPC', async () => {
-    const directory = folder(); metadata(directory)
-    const result = stageMoneroAdapter({ directory, source: nativeSource!, platform: 'darwin-arm64' })
+    const directory = folder(); metadata(directory, { platform: hostPlatform })
+    const result = stageMoneroAdapter({ directory, source: nativeSource!, platform: hostPlatform })
     expect(result).toMatchObject({ staged: true, sha256: artifact!.sha256 })
     expect(await verifiedHostAdapter(join(directory, 'monero-wallet-rpc'))).toBe(result.path!)
-    const again = stageMoneroAdapter({ directory, platform: 'darwin-arm64', ifAvailable: true })
+    const again = stageMoneroAdapter({ directory, platform: hostPlatform, ifAvailable: true })
     expect(again.path).toBe(result.path)
-    metadata(directory, { hostAdapterSha256: '0'.repeat(64) })
+    metadata(directory, { platform: hostPlatform, hostAdapterSha256: '0'.repeat(64) })
     expect(await verifiedHostAdapter(join(directory, 'monero-wallet-rpc'))).toBeNull()
     rmSync(join(directory, 'monero-tools.json'))
     const other = join(folder(), 'metadata'); writeFileSync(other, '{}'); symlinkSync(other, join(directory, 'monero-tools.json'))
-    expect(() => stageMoneroAdapter({ directory, platform: 'darwin-arm64' })).toThrow('metadata file')
+    expect(() => stageMoneroAdapter({ directory, platform: hostPlatform })).toThrow('metadata file')
   })
 
   test('runtime accepts a sealed re-sign receipt, but raw staging never accepts changed bytes', async () => {
-    const directory = folder(); metadata(directory)
-    const installed = stageMoneroAdapter({ directory, source: nativeSource!, platform: 'darwin-arm64' }).path!
+    const directory = folder(); metadata(directory, { platform: hostPlatform })
+    const installed = stageMoneroAdapter({ directory, source: nativeSource!, platform: hostPlatform }).path!
     const changed = Buffer.concat([readFileSync(installed), Buffer.from('PUBLIC-MOCK-SIGNATURE')])
     writeFileSync(installed, changed)
-    metadata(directory, { hostAdapterRawSha256: artifact!.sha256, hostAdapterSha256: createHash('sha256').update(changed).digest('hex') })
-    expect(await verifiedHostAdapter(join(directory, 'monero-wallet-rpc'))).toBe(installed)
-    expect(() => stageMoneroAdapter({ directory, platform: 'darwin-arm64' })).toThrow('reviewed bytes')
-    metadata(directory, { hostAdapterRawSha256: '0'.repeat(64), hostAdapterSha256: createHash('sha256').update(changed).digest('hex') })
+    metadata(directory, { platform: hostPlatform, hostAdapterRawSha256: artifact!.sha256, hostAdapterSha256: createHash('sha256').update(changed).digest('hex') })
+    // Only the macOS outer app seal can vouch for re-signed bytes; elsewhere they are refused.
+    expect(await verifiedHostAdapter(join(directory, 'monero-wallet-rpc'))).toBe(hostPlatform.startsWith('darwin-') ? installed : null)
+    expect(() => stageMoneroAdapter({ directory, platform: hostPlatform })).toThrow('reviewed bytes')
+    metadata(directory, { platform: hostPlatform, hostAdapterRawSha256: '0'.repeat(64), hostAdapterSha256: createHash('sha256').update(changed).digest('hex') })
     expect(await verifiedHostAdapter(join(directory, 'monero-wallet-rpc'))).toBeNull()
   })
 
@@ -111,8 +129,8 @@ describe.skipIf(!nativeAvailable)('reviewed native Monero decoder (public fixtur
   }
 
   test('watch-worker transfer, native decoder and IPC validation preserve standard/subaddress Max in either output order', async () => {
-    const directory = folder(); metadata(directory)
-    const adapter = stageMoneroAdapter({ directory, source: nativeSource!, platform: 'darwin-arm64' }).path!
+    const directory = folder(); metadata(directory, { platform: hostPlatform })
+    const adapter = stageMoneroAdapter({ directory, source: nativeSource!, platform: hostPlatform }).path!
     for (const name of sweepCases) {
       const fixture = requestFixture(name), plan = expectedSweepPlan(name)
       const recipient = plan.outputs.find(output => output.amountAtomic !== '0')!

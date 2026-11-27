@@ -12,7 +12,7 @@ const balances = [
   { chainId: 'zcash', symbol: 'ZEC', balance: '1.25', balanceUsd: 50, nativeBalanceUsd: 50, priceUsd: 40, address: addresses.zcash, tokens: [], syncState: 'confirmed', updatedAt: Date.now() },
 ]
 const settings = {
-  passwordManagerEnabled: false, moneroEnabled: false, moneroAvailable: false,
+  passwordManagerEnabled: false, moneroEnabled: false,
   zcashPrivacyEnabled: false, btcMultisigEnabled: false, walletConnectEnabled: false,
   emulatorEnabled: false, hiveEnabled: false, offlineMode: false, restApiEnabled: false,
   btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: true,

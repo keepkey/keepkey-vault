@@ -30,8 +30,8 @@ def sha(path):
     return digest.hexdigest()
 
 
-def run(command, timeout=180):
-    result = subprocess.run(list(map(str, command)), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+def run(command, timeout=180, cwd=None):
+    result = subprocess.run(list(map(str, command)), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, cwd=cwd)
     if result.returncode:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
         raise RuntimeError(f"Pinned Monero tools preparation command failed: {command[0]} (exit {result.returncode})"
@@ -68,7 +68,9 @@ def main():
         home.mkdir(mode=0o700)
         keyring = root / "release-key.gpg"
         run(["gpg", "--no-options", "--homedir", home, "--batch", "--yes", "--output", keyring, "--dearmor", key])
-        verification = run(["gpgv", "--homedir", home, "--status-fd", "1", "--keyring", keyring, manifest])
+        # Relative keyring path: the msys gpgv on Windows reads "C:\..." as a key resource
+        # URL scheme and refuses it. "./" keeps gpgv from looking the name up in its homedir.
+        verification = run(["gpgv", "--homedir", home, "--status-fd", "1", "--keyring", "./" + keyring.name, manifest], cwd=root)
         if not any(line.startswith("[GNUPG:] VALIDSIG " + FINGERPRINT + " ") for line in verification.splitlines()):
             raise RuntimeError("Release signature does not match pinned signing fingerprint")
         archive = args.archive.resolve() if args.archive else root / archive_name

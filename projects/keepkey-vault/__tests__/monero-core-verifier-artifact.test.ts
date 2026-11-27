@@ -11,7 +11,9 @@ async function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'monero-core-artifact-'))); directories.push(root)
   const bytes = Buffer.from('PUBLIC SYNTHETIC CORE VERIFIER'), source = join(root, 'raw.dylib')
   writeFileSync(source, bytes, { mode: 0o755 })
-  const manifest = { files: { 'darwin-arm64': { filename: 'libmonero_core_verify.dylib', sha256: sha(bytes), size: bytes.length, minimumMacosVersion: '13.0', minimumDarwinMajor: 22 } } }
+  // win32-x64 carries no macOS floor fields, exactly as its real manifest entry will.
+  const manifest = { files: { 'darwin-arm64': { filename: 'libmonero_core_verify.dylib', sha256: sha(bytes), size: bytes.length, minimumMacosVersion: '13.0', minimumDarwinMajor: 22 },
+    'win32-x64': { filename: 'monero_core_verify.dll', sha256: sha(bytes), size: bytes.length } } }
   const entry = join(root, 'entry.ts')
   writeFileSync(entry, ['../src/bun/monero-core-verifier-artifact.ts', '../scripts/stage-monero-core-verifier.ts', '../scripts/sign-monero-core-verifier.ts']
     .map(p => `export * from ${JSON.stringify(resolve(import.meta.dir, p))};`).join('\n'))
@@ -34,7 +36,7 @@ test('staging requires exact bytes, regular files, safe permissions and an appro
   expect(f.api.checkRawMoneroCoreVerifier(f.source, f.platform)).toBe(false)
   chmodSync(f.source, 0o755); writeFileSync(f.source, 'TAMPERED')
   expect(() => f.api.stageMoneroCoreVerifier({ source: f.source, directory: output, platform: f.platform })).toThrow('reviewed bytes')
-  expect(() => f.api.stageMoneroCoreVerifier({ source: f.source, directory: output, platform: 'win32-x64' })).toThrow('No reviewed')
+  expect(() => f.api.stageMoneroCoreVerifier({ source: f.source, directory: output, platform: 'linux-x64' })).toThrow('No reviewed')
 })
 
 test('signed copies preserve pristine input and receipts never qualify unsealed bytes', async () => {
@@ -60,6 +62,10 @@ test('preflight checks the real native floor and refuses unsupported hosts', asy
   expect(f.api.moneroCoreVerifierHostSupported(f.platform, '22.0.0')).toBe(true)
   expect(f.api.moneroCoreVerifierHostSupported(f.platform, '21.6.0')).toBe(false)
   expect(f.api.moneroCoreVerifierHostSupported('darwin-x64', '26.0.0')).toBe(false)
+  // os.release() is 10.0.x on Windows; it is not a Darwin major and must not gate Windows.
+  expect(f.api.moneroCoreVerifierHostSupported('win32-x64', '10.0.22631')).toBe(true)
+  expect(f.api.moneroCoreVerifierHostSupported('win32-x64', '10.0.19045')).toBe(true)
+  expect(f.api.moneroCoreVerifierHostSupported('linux-x64', '6.8.0-45-generic')).toBe(false)
   expect(f.api.moneroCoreVerifierHostSupported(f.platform, 'not a version')).toBe(false)
 })
 
@@ -69,4 +75,16 @@ test('corrupt raw input fails before any signing operation', async () => {
   expect(() => f.api.stageSignedMoneroCoreVerifier({ source: f.source, directory: join(f.root, 'signed'), platform: f.platform,
     identity: 'PUBLIC FIXTURE', sign() { calls++ } })).toThrow('reviewed raw')
   expect(calls).toBe(0)
+})
+
+test('Windows stages the reviewed DLL under its manifest name and never accepts a signed-copy receipt', async () => {
+  const f = await fixture(), output = join(f.root, 'win')
+  const staged = f.api.stageMoneroCoreVerifier({ source: f.source, directory: output, platform: 'win32-x64' })
+  expect(staged).toBe(join(output, 'monero_core_verify.dll'))
+  expect(f.api.checkMoneroCoreVerifierDirectory(output, 'win32-x64')).toBe(staged)
+  expect(f.api.checkMoneroCoreVerifierDirectory(output, 'darwin-arm64')).toBeNull()
+  writeFileSync(staged, Buffer.concat([f.bytes, Buffer.from(' AUTHENTICODE')]))
+  writeFileSync(join(output, 'core-verifier-receipt.json'), JSON.stringify(f.api.moneroCoreVerifierReceipt(sha(readFileSync(staged)), 'win32-x64')))
+  // Raw-hash policy: changed bytes fail unless an outer seal was verified, which Windows never has.
+  expect(f.api.checkMoneroCoreVerifierDirectory(output, 'win32-x64')).toBeNull()
 })

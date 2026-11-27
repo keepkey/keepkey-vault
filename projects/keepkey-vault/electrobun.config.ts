@@ -3,7 +3,7 @@ import { existsSync as existsFromCwd } from "node:fs";
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from "node:url";
 import pkg from "./package.json";
-import { verifiedHostAdapterFile } from "./monero-cli/src/host-adapter";
+import { hostAdapterArtifact, verifiedHostAdapterFile } from "./monero-cli/src/host-adapter";
 import { checkMoneroCoreVerifierDirectory, moneroCoreVerifierArtifact } from './src/bun/monero-core-verifier-artifact';
 
 const isWindows = process.platform === "win32";
@@ -41,7 +41,10 @@ const zcashCliSource = toolSource(process.env.KEEPKEY_ZCASH_CLI_SOURCE || `zcash
 const moneroCliSource = toolSource(process.env.KEEPKEY_MONERO_CLI_SOURCE || `monero-cli/dist/${moneroSidecar}`);
 const moneroRpcSource = toolSource(process.env.KEEPKEY_MONERO_RPC_SOURCE || `${moneroVendor}/${moneroRpc}`);
 const moneroMetadataSource = toolSource(process.env.KEEPKEY_MONERO_METADATA_SOURCE || `${moneroVendor}/monero-tools.json`);
-const moneroAdapterSource = toolSource(process.env.KEEPKEY_MONERO_ADAPTER_SOURCE || `${moneroVendor}/monero-host-adapter`);
+// File names come from the reviewed manifests (monero-host-adapter.exe and monero_core_verify.dll on
+// Windows); a hard-coded macOS name would silently leave the native helpers out of other packages.
+const moneroAdapterName = hostAdapterArtifact(moneroPlatform)?.filename ?? (isWindows ? 'monero-host-adapter.exe' : 'monero-host-adapter');
+const moneroAdapterSource = toolSource(process.env.KEEPKEY_MONERO_ADAPTER_SOURCE || `${moneroVendor}/${moneroAdapterName}`);
 const verifiedMoneroAdapter = existsSync(moneroAdapterSource)
     ? verifiedHostAdapterFile(join(projectDir, moneroAdapterSource), join(projectDir, moneroMetadataSource), moneroPlatform) : null;
 if (existsSync(moneroAdapterSource) && !verifiedMoneroAdapter) throw new Error('The Monero host adapter does not match its reviewed metadata');
@@ -51,7 +54,7 @@ const moneroCopy = existsSync(moneroCliSource) && existsSync(moneroRpcSource)
     ? { [moneroCliSource]: moneroSidecar,
         [moneroRpcSource]: `monero-tools/${moneroRpc}`,
         [moneroMetadataSource]: "monero-tools/monero-tools.json",
-        ...(verifiedMoneroAdapter ? { [moneroAdapterSource]: "monero-tools/monero-host-adapter",
+        ...(verifiedMoneroAdapter ? { [moneroAdapterSource]: `monero-tools/${moneroAdapterName}`,
             'monero-cli/host-adapter-LICENSES.txt': 'monero-tools/HOST-ADAPTER-LICENSES.txt' } : {}),
         ...(existsSync(moneroDaemonSource) ? { [moneroDaemonSource]: `monero-tools/${moneroDaemon}` } : {}),
         [`${moneroVendor}/LICENSE`]: "monero-tools/LICENSE" } : {};
@@ -59,14 +62,15 @@ const moneroCopy = existsSync(moneroCliSource) && existsSync(moneroRpcSource)
 // signing emulator builds. The verified host adapter is packaged separately for normal receive access.
 const includeMoneroResearch = process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1';
 // Capability signing uses the independently hash-checked Core verifier, without a host prover.
-const verifierArtifact = moneroCoreVerifierArtifact();
-const moneroVerifierSource = toolSource(process.env.KEEPKEY_MONERO_CORE_VERIFIER_SOURCE || 'monero-device-bundle/libmonero_core_verify.dylib');
+const verifierArtifact = moneroCoreVerifierArtifact(moneroPlatform);
+const moneroVerifierName = verifierArtifact?.filename ?? 'libmonero_core_verify.dylib';
+const moneroVerifierSource = toolSource(process.env.KEEPKEY_MONERO_CORE_VERIFIER_SOURCE || `monero-device-bundle/${moneroVerifierName}`);
 const moneroVerifierReceiptSource = process.env.KEEPKEY_MONERO_CORE_VERIFIER_RECEIPT_SOURCE;
 const verifiedCoreVerifier = verifierArtifact && existsSync(moneroVerifierSource)
     ? checkMoneroCoreVerifierDirectory(dirname(join(projectDir, moneroVerifierSource)), undefined, !!moneroVerifierReceiptSource) : null;
 if (verifierArtifact && existsSync(moneroVerifierSource) && !verifiedCoreVerifier) throw new Error('The Monero Core verifier does not match its reviewed metadata');
 const moneroDeviceCopy = verifiedCoreVerifier
-    ? { [moneroVerifierSource]: 'monero-device/libmonero_core_verify.dylib',
+    ? { [moneroVerifierSource]: `monero-device/${moneroVerifierName}`,
         'monero-cli/core-verifier-LICENSES.txt': 'monero-device/LICENSES.txt',
         ...(moneroVerifierReceiptSource ? { [toolSource(moneroVerifierReceiptSource)]: 'monero-device/core-verifier-receipt.json' } : {}) } : {};
 const moneroEmulatorCopy = {

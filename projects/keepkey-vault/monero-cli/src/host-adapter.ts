@@ -34,6 +34,9 @@ export function verifiedHostAdapterFile(path: string, metadataPath: string, plat
     if (info.version !== manifest.moneroVersion || info.platform !== platform ||
         typeof runtimeHash !== 'string' || !/^[0-9a-f]{64}$/.test(runtimeHash) ||
         (info.hostAdapterRawSha256 ?? runtimeHash) !== artifact.sha256) return null
+    // Only macOS seals this JSON with the outer app signature. Windows and Linux ship the
+    // reviewed raw bytes unsigned, so an unsealed receipt must not vouch for changed bytes.
+    if (!platform.startsWith('darwin-') && runtimeHash !== artifact.sha256) return null
     const size = runtimeHash === artifact.sha256 ? artifact.size : lstatSync(path).size
     return checkHostAdapterFile(path, { ...artifact, size, sha256: runtimeHash }) ? path : null
   } catch { return null }

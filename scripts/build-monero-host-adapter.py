@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Build the read-only Monero export decoder for macOS ARM64 (13.0 or later).
+"""Build the read-only Monero export decoder for one platform key.
+
+darwin-arm64: macOS 13.0 or later, Apple clang (the reviewed recipe, unchanged).
+win32-x64: native MSYS2 UCRT64 (MinGW-w64 GCC) build of a fully static .exe that
+imports only Windows/UCRT system DLLs. Run it with the UCRT64 Python inside an
+MSYS2 UCRT64 shell, so msys perl/make/sh and the UCRT64 gcc/cmake are on PATH.
 
 Supply all seven pinned source archives explicitly. No downloads, device access,
 wallet credentials, signing or relay are involved. A fresh build records the
@@ -24,6 +29,7 @@ SYSTEM_DEPENDENCIES = {
     "/System/Library/Frameworks/Kerberos.framework/Versions/A/Kerberos",
     "/usr/lib/libmd.dylib", "/usr/lib/libc++.1.dylib", "/usr/lib/libSystem.B.dylib",
 }
+TARGETS = {"darwin-arm64": "darwin", "win32-x64": "win32"}
 
 
 def digest(path):
@@ -35,7 +41,8 @@ def validate_used_boost_headers(cache, boost):
     # therefore shadow it even when FindBoost selects our pinned headers/libs.
     # Validate the headers the compiler actually used, not only CMake's cache.
     used = {}
-    for dependency in cache.rglob("*.o.d"):
+    # Clang on macOS writes <object>.o.d; MinGW objects are .obj, so CMake writes <object>.obj.d.
+    for dependency in [*cache.rglob("*.o.d"), *cache.rglob("*.obj.d")]:
         for name in shlex.split(dependency.read_text().replace("\\\n", " ")):
             if "/boost/" not in name:
                 continue
@@ -53,13 +60,195 @@ def validate_used_boost_headers(cache, boost):
     return {"count": len(used), "sha256": hashlib.sha256(json.dumps(used, sort_keys=True).encode()).hexdigest()}
 
 
-def build(archives, work, output, jobs):
+# --- win32-x64: MSYS2 UCRT64, fully static -----------------------------------
+# Everything below runs only for --target win32-x64. It is kept in this file, not
+# a shared module, so the manifest's buildScriptSha256 pin covers all of it.
+#
+# The only DLLs the shipped .exe may import: Windows and UCRT system libraries.
+# A MinGW runtime (libstdc++-6, libgcc_s_seh-1, libwinpthread-1), the MSVC
+# runtime (VCRUNTIME140, MSVCP140) or any third-party DLL fails the build.
+WINDOWS_SYSTEM_DLLS = {"kernel32.dll", "advapi32.dll", "user32.dll", "ws2_32.dll", "wsock32.dll", "mswsock.dll",
+                       "iphlpapi.dll", "crypt32.dll", "bcrypt.dll", "shell32.dll", "ole32.dll", "secur32.dll",
+                       "dnsapi.dll", "ucrtbase.dll"}
+# Import libraries for those DLLs, plus the static MinGW runtime pieces that -static links in.
+WINDOWS_LINK_LIBRARIES = {name[:-4] for name in WINDOWS_SYSTEM_DLLS} | {
+    "uuid", "ntdll", "psapi", "userenv", "pthread", "m", "stdc++", "gcc", "gcc_eh", "mingwex", "mingw32", "moldname"}
+WINDOWS_TOOLCHAIN_PACKAGES = ("mingw-w64-ucrt-x86_64-", "make ", "perl ")
+# Core's DNS code (dns_utils.cpp, util.cpp's unbound_built_with_threads) is unreachable
+# from this helper: macOS ld64 dead-strips it, so the reviewed darwin binary links no
+# unbound at all. GNU ld on PE keeps those references. Rather than link MSYS2's unpinned
+# libunbound, they resolve to stubs that abort, so reaching them fails closed. They sit
+# in an archive, so a link only pulls the ones it references.
+UNBOUND_UNREACHABLE = ["ub_ctx_add_ta", "ub_ctx_async", "ub_ctx_create", "ub_ctx_delete", "ub_ctx_hosts",
+                       "ub_ctx_resolvconf", "ub_ctx_set_fwd", "ub_ctx_set_option", "ub_ctx_zone_add",
+                       "ub_resolve", "ub_resolve_free", "ub_strerror"]
+
+
+def windows_unreachable_archive(work, run, flags):
+    source, obj, archive = work / "unbound-unreachable.c", work / "unbound-unreachable.o", work / "libunbound-unreachable.a"
+    source.write_text("#include <stdlib.h>\n" + "".join("void " + name + "(void) { abort(); }\n" for name in UNBOUND_UNREACHABLE))
+    run(["gcc", "-c", "-O2"] + flags + [source.as_posix(), "-o", obj.as_posix()], "unbound-unreachable.log")
+    run(["ar", "rcsD", archive.as_posix(), obj.as_posix()], "unbound-unreachable-ar.log")
+    return archive
+
+
+def windows_import_allowed(dll):
+    return dll in WINDOWS_SYSTEM_DLLS or dll.startswith("api-ms-win-crt-")
+
+
+def windows_pe_report(path):
+    """objdump -p: the PE file format, its imported DLLs and its exported names."""
+    report = subprocess.check_output(["objdump", "-p", str(path)], text=True)
+    imports = sorted({line.split("DLL Name:", 1)[1].strip().lower() for line in report.splitlines() if "DLL Name:" in line})
+    exports, inside = [], False
+    for line in report.splitlines():
+        if "[Ordinal/Name Pointer] Table" in line:
+            inside = True
+        elif inside and line.strip().startswith("["):
+            exports.append(line.split()[-1])
+        elif inside and exports and not line.strip():
+            break
+    return {"x86_64": "file format pei-x86-64" in report, "imports": imports, "exports": sorted(exports)}
+
+
+def windows_link_command(cache, target_name, work):
+    """CMake's final link line with response files expanded and every archive or library
+    from outside this build (the MSYS2 prefix) removed, except Windows system import
+    libraries. The dropped inputs are reported, so a review sees exactly what was cut."""
+    link = cache / "CMakeFiles" / (target_name + ".dir") / "link.txt"
+    if link.is_file():
+        text = link.read_text()
+    else:
+        # On a Windows host CMake's Makefile generator writes the link command into
+        # build.make, not link.txt. Every object is already built, so a dry run prints
+        # just that command (make -n echoes recipes without running them).
+        text = subprocess.run(["cmake", "--build", Path(cache).as_posix(), "--target", target_name, "--", "-n"],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout
+        (cache / (target_name + "-link-dry-run.txt")).write_text(text)
+    lines = [shlex.split(line.split("&&")[-1]) for line in text.splitlines() if line.strip()]
+    lines = [line for line in lines if line and "-o" in line and Path(line[0]).name.lower().endswith(("++.exe", "++"))]
+    if len(lines) != 1:
+        raise ValueError("Expected exactly one link command for " + target_name)
+    def native(arg):
+        # msys make may print MSYS paths (/D/xmr/...); Python runs the linker directly, so use D:/xmr/...
+        for flag in ("-L", ""):
+            rest = arg[len(flag):]
+            if arg.startswith(flag) and len(rest) > 2 and rest[0] == "/" and rest[1].isalpha() and rest[2] == "/":
+                return flag + rest[1].upper() + ":" + rest[2:]
+        return arg
+    expanded = []
+    for arg in lines[0]:
+        expanded += [native(a) for a in shlex.split((cache / arg[1:]).read_text())] if arg.startswith("@") else [native(arg)]
+    command, dropped, inside = [], [], Path(work).resolve()
+    for arg in expanded:
+        # Core adds this for MinGW shared libraries; it overrides the .def file and would
+        # export every OpenSSL, Boost and Core symbol instead of the two-symbol ABI.
+        if arg == "-Wl,--export-all-symbols":
+            dropped.append(arg)
+            continue
+        library = None
+        if arg.startswith("-l"):
+            library = arg[2:]
+        elif arg.lower().endswith(".a") and not (cache / arg).resolve().is_relative_to(inside):
+            name = Path(arg).name
+            library = name[3:].split(".", 1)[0] if name.startswith("lib") else name
+        if library is not None and library.lower() not in WINDOWS_LINK_LIBRARIES:
+            dropped.append(arg)
+            continue
+        command.append(arg)
+    return command, sorted(set(dropped))
+
+
+def windows_missing_link_inputs(cache, command):
+    """Files the final link reads that the Core build did not produce."""
+    output = command[command.index("-o") + 1]
+    return [arg for arg in command[1:] if not arg.startswith("-") and arg != output and not (cache / arg).is_file()]
+
+
+def windows_toolchain():
+    packages = subprocess.check_output(["pacman", "-Q"], text=True).splitlines()
+    return {"compiler": subprocess.check_output(["gcc", "--version"], text=True).splitlines()[0],
+            "msys2Packages": sorted(line for line in packages if line.startswith(WINDOWS_TOOLCHAIN_PACKAGES))}
+
+
+def build_windows(work, output, jobs, run, artifact, adapter, core, boost, sodium, openssl, pins):
+    posix = lambda path: Path(path).as_posix()  # noqa: E731  CMake and msys tools read forward slashes
+    prefix = "-ffile-prefix-map=" + posix(work) + "=/monero-host-adapter-build"
+    sections = ["-ffunction-sections", "-fdata-sections"]
+    # msys perl and make, as OpenSSL's NOTES-WINDOWS requires for the mingw64 target.
+    run(["perl", "Configure", "mingw64", "no-shared", "no-tests", "no-module", "no-engine", "no-legacy", "no-dso",
+         prefix] + sections, "openssl-configure.log", openssl)
+    run(["make", "-j" + str(jobs), "build_libs"], "openssl-build.log", openssl)
+    run(["sh", "bootstrap.sh", "--with-libraries=" + ",".join(BOOST_LIBRARIES), "--with-toolset=gcc"], "boost-bootstrap.log", boost)
+    run([str(boost / "b2.exe")] + ["--with-" + name for name in BOOST_LIBRARIES] + [
+        "--layout=system", "toolset=gcc", "variant=release", "link=static", "runtime-link=static", "threading=multi",
+        "threadapi=win32", "target-os=windows", "architecture=x86", "address-model=64",
+        "boost.locale.icu=off", "boost.locale.iconv=off", "cxxflags=" + " ".join(sections + [prefix]),
+        "stage", "-j" + str(jobs)], "boost-build.log", boost)
+    objects = []
+    for name, relative in [("sodium-verify.o", "src/libsodium/crypto_verify/verify.c"),
+                           ("sodium-siphash.o", "src/libsodium/crypto_shorthash/siphash24/ref/shorthash_siphash24_ref.c")]:
+        objects.append(work / name)
+        run(["gcc", "-c", "-O2"] + sections + [prefix, "-I" + posix(sodium / "src/libsodium/include/sodium"),
+             posix(sodium / relative), "-o", posix(work / name)], name + ".log")
+    hook = work / "host-adapter.cmake"
+    hook.write_text("\n".join([
+        "function(keepkey_host_adapter)",
+        ' add_executable(monero_host_adapter "' + posix(adapter) + '")',
+        " target_link_libraries(monero_host_adapter PRIVATE wallet version)",
+        ' set_target_properties(monero_host_adapter PROPERTIES CXX_STANDARD 14 OUTPUT_NAME monero-host-adapter RUNTIME_OUTPUT_DIRECTORY "' + posix(work / "intermediate") + '")',
+        " target_link_options(monero_host_adapter PRIVATE -static -static-libgcc -static-libstdc++ -Wl,--gc-sections -Wl,--no-insert-timestamp)",
+        "endfunction()", "cmake_language(DEFER CALL keepkey_host_adapter)", ""]))
+    cache = work / "core-build"
+    mappings = " ".join(sections + [prefix, "-ffile-prefix-map=" + posix(NATIVE) + "=/monero-host-adapter-source"])
+    stage = boost / "stage/lib"
+    # ARCH=x86-64: Monero's default is -march=native, which is neither reproducible nor portable.
+    run(["cmake", "-G", "MSYS Makefiles", "-S", posix(core), "-B", posix(cache), "-DMANUAL_SUBMODULES=ON", "-DBUILD_TESTS=OFF",
+         "-DBUILD_DOCUMENTATION=OFF", "-DBUILD_GUI_DEPS=OFF", "-DUSE_DEVICE_TREZOR=OFF", "-DCMAKE_DISABLE_FIND_PACKAGE_HIDAPI=TRUE",
+         "-DMONERO_WALLET_CRYPTO_LIBRARY=cn", "-DCMAKE_BUILD_TYPE=Release", "-DSTATIC=ON", "-DARCH=x86-64", "-DBUILD_64=ON",
+         "-DUSE_READLINE=OFF", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+         "-DCMAKE_C_FLAGS=" + mappings, "-DCMAKE_CXX_FLAGS=" + mappings,
+         "-DBOOST_IGNORE_SYSTEM_PATHS=ON", "-DBOOST_ROOT=" + posix(boost), "-DBoost_INCLUDE_DIR=" + posix(boost),
+         "-DBoost_USE_STATIC_LIBS=ON", "-DBoost_LIBRARY_DIR_RELEASE=" + posix(stage), "-DBoost_LIBRARY_DIR_DEBUG=" + posix(stage),
+         "-DOPENSSL_ROOT_DIR=" + posix(openssl), "-DOPENSSL_INCLUDE_DIR=" + posix(openssl / "include"),
+         "-DOPENSSL_SSL_LIBRARY=" + posix(openssl / "libssl.a"), "-DOPENSSL_CRYPTO_LIBRARY=" + posix(openssl / "libcrypto.a"),
+         "-DOPENSSL_USE_STATIC_LIBS=TRUE", "-DCMAKE_PROJECT_monero_INCLUDE=" + posix(hook)] + [
+             "-DBoost_" + name.upper() + "_LIBRARY_" + variant + "=" + posix(stage / ("libboost_" + name + ".a"))
+             for name in BOOST_LIBRARIES for variant in ["RELEASE", "DEBUG"]], "core-configure.log")
+    # Core's own link of this target pulls in MSYS2's static libunbound (built against a
+    # newer OpenSSL) and fails; that binary is discarded anyway. make -k still builds every
+    # object and library, and the final link below, which drops unbound, is the real check.
+    run(["cmake", "--build", posix(cache), "--target", "monero_host_adapter", "-j" + str(jobs), "--", "-k"], "core-build.log", check=False)
+    used_boost_headers = validate_used_boost_headers(cache, boost)
+    command, dropped = windows_link_command(cache, "monero_host_adapter", work)
+    missing = windows_missing_link_inputs(cache, command)
+    if missing:
+        raise RuntimeError("Core build did not produce " + ", ".join(missing[:5]) + "; inspect " + str(work / "core-build.log"))
+    command[command.index("-o") + 1] = posix(output)
+    command += [posix(path) for path in objects] + [posix(windows_unreachable_archive(work, run, sections + [prefix]))]
+    run(command, "final-link.log", cache)
+    pe = windows_pe_report(output)
+    disallowed = [dll for dll in pe["imports"] if not windows_import_allowed(dll)]
+    if not pe["x86_64"] or disallowed:
+        raise ValueError("Adapter must be an x86-64 PE importing only Windows/UCRT system DLLs; found " + ", ".join(disallowed or ["a non-x86-64 image"]))
+    return {"status": "pass", "target": "win32-x64", "path": str(output), "sha256": digest(output), "size": output.stat().st_size,
+            "architecture": "x86_64", "dependencies": pe["imports"], "droppedLinkInputs": dropped,
+            "abortingStubsAvailable": UNBOUND_UNREACHABLE,
+            "matchesReviewedArtifact": bool(artifact) and digest(output) == artifact["sha256"], "archivesSha256": pins,
+            "usedBoostHeaders": used_boost_headers, "sourceSha256": digest(adapter), "buildScriptSha256": digest(Path(__file__)),
+            **windows_toolchain()}
+
+
+def build(archives, work, output, jobs, target="darwin-arm64"):
     manifest = json.loads(MANIFEST.read_text())
     source = manifest["source"]
-    artifact = manifest["files"]["darwin-arm64"]
+    if target not in TARGETS:
+        raise ValueError("Unsupported target: " + target)
+    # A target without a reviewed pin yet still builds; its result reports the hash to pin.
+    artifact = manifest["files"].get(target)
     adapter = NATIVE / "host-adapter.cpp"
-    if sys.platform != "darwin" or not 1 <= jobs <= 16:
-        raise ValueError("A macOS host and 1..16 build jobs are required")
+    if sys.platform != TARGETS[target] or not 1 <= jobs <= 16:
+        raise ValueError("A native " + TARGETS[target] + " host and 1..16 build jobs are required for " + target)
     if work.exists() or output.exists() or output.is_symlink():
         raise ValueError("Build directory and adapter output must not already exist")
     if digest(adapter) != source["sha256"] or digest(Path(__file__)) != source["buildScriptSha256"]:
@@ -90,13 +279,18 @@ def build(archives, work, output, jobs):
                 member.name = str(Path(*parts))
                 archive.extract(member, destination, filter="data")
 
-    def run(command, logfile, cwd=None):
+    def run(command, logfile, cwd=None, check=True):
         with (work / logfile).open("w") as log:
             log.write(json.dumps(list(map(str, command))) + "\n"); log.flush()
             environment = {**os.environ, "SOURCE_DATE_EPOCH": str(source["sourceDateEpoch"]), "ZERO_AR_DATE": "1"}
             result = subprocess.run(command, cwd=cwd, env=environment, stdout=log, stderr=subprocess.STDOUT)
-        if result.returncode:
+        if check and result.returncode:
             raise RuntimeError("Native build failed; inspect " + str(work / logfile))
+
+    if target == "win32-x64":
+        result = build_windows(work, output, jobs, run, artifact, adapter, core, boost, sodium, openssl, pins)
+        (work / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+        return result
 
     flags = "-arch arm64 -mmacosx-version-min=13.0 -ffile-prefix-map=" + str(work) + "=/monero-host-adapter-build"
     run(["/usr/bin/perl", "./Configure", "darwin64-arm64-cc", "no-shared", "no-tests", "no-module", "no-engine", "no-legacy", "no-dso",
@@ -158,7 +352,7 @@ def build(archives, work, output, jobs):
         raise ValueError("Adapter dependency, architecture, minimum OS or UUID contract failed")
     result = {"status": "pass", "path": str(output), "sha256": digest(output), "size": output.stat().st_size,
               "minimumMacosVersion": "13.0", "architecture": architecture, "dependencies": dependencies,
-              "matchesReviewedArtifact": digest(output) == artifact["sha256"], "archivesSha256": pins,
+              "matchesReviewedArtifact": bool(artifact) and digest(output) == artifact["sha256"], "archivesSha256": pins,
               "usedBoostHeaders": used_boost_headers,
               "sourceSha256": digest(adapter), "buildScriptSha256": digest(Path(__file__)),
               "compiler": subprocess.check_output(["/usr/bin/clang++", "--version"], text=True).splitlines()[0],
@@ -173,8 +367,9 @@ if __name__ == "__main__":
     parser.add_argument("--work-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--jobs", type=int, default=8)
+    parser.add_argument("--target", choices=sorted(TARGETS), default="darwin-arm64")
     args = parser.parse_args()
     try:
-        print(json.dumps(build(args.archive_dir.resolve(), args.work_dir.absolute(), args.output.absolute(), args.jobs), indent=2))
+        print(json.dumps(build(args.archive_dir.resolve(), args.work_dir.absolute(), args.output.absolute(), args.jobs, args.target), indent=2))
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         parser.exit(1, str(error) + "\n")

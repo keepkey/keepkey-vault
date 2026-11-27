@@ -6,14 +6,17 @@ import { join, resolve } from 'node:path'
 import { moneroReleaseAssetProblems } from '../scripts/monero-release-assets'
 import { checkRawMoneroCoreVerifier } from '../src/bun/monero-core-verifier-artifact'
 import { verifiedHostAdapterIn } from '../monero-cli/src/host-adapter'
+import { ARCHIVE_HASHES } from '../monero-cli/src/tools'
 
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex')
 const adapterBytes = Buffer.from('PUBLIC SYNTHETIC MONERO DECODER'), verifierBytes = Buffer.from('PUBLIC SYNTHETIC CORE VERIFIER')
 const adapterManifest = { protocol: 'keepkey-monero-wallet-export-v1', moneroVersion: '0.18.5.4', files: {
   'darwin-arm64': { filename: 'monero-host-adapter', sha256: sha(adapterBytes), size: adapterBytes.length },
+  'win32-x64': { filename: 'monero-host-adapter.exe', sha256: sha(adapterBytes), size: adapterBytes.length },
 } }
 const verifierManifest = { files: {
   'darwin-arm64': { filename: 'libmonero_core_verify.dylib', sha256: sha(verifierBytes), size: verifierBytes.length, minimumMacosVersion: '13.0', minimumDarwinMajor: 22 },
+  'win32-x64': { filename: 'monero_core_verify.dll', sha256: sha(verifierBytes), size: verifierBytes.length },
 } }
 const directories: string[] = []
 const moduleRoot = realpathSync(mkdtempSync(join(tmpdir(), 'monero-release-check-module-')))
@@ -52,6 +55,40 @@ function fixture() {
   return { app, tools, native, bun, adapter, verifier, write, metadata, metadataPath, updateMetadata }
 }
 const ready = () => ({ code: 0, output: '{"moneroCorePlanSize":7544}' })
+
+/** Windows layout: <root>/Resources/app beside <root>/bin/bun.exe, every helper with .exe/.dll. */
+function windowsFixture() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'monero-release-win-'))); directories.push(root)
+  const app = join(root, 'keepkey-vault/Resources/app'), tools = join(app, 'monero-tools'), native = join(app, 'monero-device')
+  const write = (path: string, bytes: string | Buffer) => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, bytes, { mode: 0o755 }) }
+  const bun = join(root, 'keepkey-vault/bin/bun.exe'), adapter = join(tools, 'monero-host-adapter.exe'), verifier = join(native, 'monero_core_verify.dll')
+  write(bun, 'PUBLIC SYNTHETIC PACKAGED BUN'); write(join(app, 'monero-cli.exe'), 'PUBLIC SYNTHETIC WORKER')
+  write(join(tools, 'monero-wallet-rpc.exe'), 'PUBLIC SYNTHETIC RPC'); write(join(tools, 'monerod.exe'), 'PUBLIC SYNTHETIC NODE')
+  write(adapter, adapterBytes); write(verifier, verifierBytes)
+  write(join(tools, 'HOST-ADAPTER-LICENSES.txt'), 'public decoder notices'); write(join(native, 'LICENSES.txt'), 'public verifier notices')
+  write(join(tools, 'monero-tools.json'), JSON.stringify({ version: '0.18.5.4', platform: 'win32-x64', archiveSha256: ARCHIVE_HASHES['win32-x64'],
+    signerFingerprint: '81AC591FE9C4B65C5806AFC3F0AF4D462A0BDF92', walletRpcSha256: sha('PUBLIC SYNTHETIC RPC'), daemonSha256: sha('PUBLIC SYNTHETIC NODE'),
+    hostAdapterSha256: sha(adapterBytes), hostAdapterRawSha256: sha(adapterBytes) }))
+  return { app, tools, bun, adapter, verifier, write }
+}
+
+test('a Windows bundle uses .exe/.dll names and probes bin/bun.exe', () => {
+  const f = windowsFixture(), calls: string[][] = []
+  expect(check(f.app, 'win32-x64', false, (...args) => { calls.push(args); return ready() })).toEqual([])
+  expect(calls).toEqual([[f.bun, f.verifier, f.app]])
+})
+
+test('a Windows bundle missing its .exe tools or carrying a signed helper fails before any probe', () => {
+  const f = windowsFixture(); let probes = 0
+  const probe = () => { probes++; return ready() }
+  rmSync(join(f.tools, 'monerod.exe'))
+  expect(check(f.app, 'win32-x64', false, probe).join()).toContain('monerod.exe')
+  f.write(join(f.tools, 'monerod.exe'), 'PUBLIC SYNTHETIC NODE')
+  // Signing a raw-pinned helper changes its bytes; Windows has no app seal to vouch for them.
+  f.write(f.verifier, Buffer.concat([verifierBytes, Buffer.from(' AUTHENTICODE')]))
+  expect(check(f.app, 'win32-x64', false, probe).join()).toContain('Core verifier')
+  expect(probes).toBe(0)
+})
 
 test('a complete raw bundle qualifies and probes only its packaged Bun and reviewed verifier', () => {
   const f = fixture(), calls: string[][] = []
@@ -94,7 +131,7 @@ test('a failed load, wrong ABI or malformed result rejects an otherwise authenti
 })
 
 test('platforms without qualified native pins do not run a Monero probe or require optional artifacts', () => {
-  for (const platform of ['darwin-x64', 'linux-x64', 'win32-x64']) {
+  for (const platform of ['darwin-x64', 'linux-x64']) {
     expect(check('/does/not/exist', platform, false, () => { throw new Error('Must not probe unsupported hosts') })).toEqual([])
   }
 })

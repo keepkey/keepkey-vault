@@ -12,6 +12,7 @@ import { verifyEmulatorBeforeSigning, writeEmulatorSigningReceipt } from './writ
 import { createMacosSigningShim } from './macos-signing/shim'
 import { stageSignedMoneroCoreVerifier } from './sign-monero-core-verifier'
 import { checkRawMoneroCoreVerifier, moneroCoreVerifierArtifact } from '../src/bun/monero-core-verifier-artifact'
+import { hostAdapterArtifact } from '../monero-cli/src/host-adapter'
 import pkg from '../package.json'
 
 const env = process.argv[2] || 'stable'
@@ -99,7 +100,8 @@ if ((process.env.KEEPKEY_REQUIRE_MONERO_SIDECAR === '1' || presentMoneroInputs.l
 const verifierArtifact = moneroCoreVerifierArtifact()
 if (hasMoneroInputs && verifierArtifact) {
   const source = resolve(import.meta.dir, '../monero-device-bundle', verifierArtifact.filename)
-  const adapter = resolve(import.meta.dir, '..', `monero-cli/vendor/${process.platform}-${process.arch}/monero-host-adapter`)
+  const adapterName = hostAdapterArtifact()?.filename ?? 'monero-host-adapter'
+  const adapter = resolve(import.meta.dir, '..', `monero-cli/vendor/${process.platform}-${process.arch}/${adapterName}`)
   if (!existsSync(adapter) || !checkRawMoneroCoreVerifier(source)) throw new Error('Monero signing requires the reviewed plan adapter and Core verifier. Stage both before packaging.')
   if (process.platform === 'darwin' && process.env.CI !== 'true') {
     const developer = process.env.ELECTROBUN_DEVELOPER_ID, team = process.env.ELECTROBUN_TEAMID
