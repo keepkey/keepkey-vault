@@ -7,7 +7,7 @@
  */
 import type { ChainDef } from '../../shared/chains'
 import { evmAddressPath } from '../../shared/chains'
-import { tokenMaxSpendableBaseUnits } from '../../shared/max-send'
+import { l1DataFeeBufferWei, tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { isEvmAddress } from '../../shared/address-validation'
 import { GAS_PRICE_ERROR } from '../../shared/gas-price-errors'
 import { decimalAmount } from '../../shared/locale'
@@ -416,7 +416,9 @@ export async function buildEvmTx(
 
   let amountWei: bigint
   if (isMax) {
-    const gasReserve = (gasFee * 110n + 99n) / 100n // 10% gas buffer, rounded up
+    // 10% gas buffer, rounded up, plus the L1 data fee the L2s charge apart
+    // from gasPrice × gasLimit (same buffer the swap max uses).
+    const gasReserve = (gasFee * 110n + 99n) / 100n + l1DataFeeBufferWei(chain.id)
     if (nativeBalance <= gasReserve) throw new Error(balanceErrorMessage('gasForMax'))
     amountWei = nativeBalance - gasReserve
     if (amountWei <= 0n) throw new Error(balanceErrorMessage('gasForMax'))

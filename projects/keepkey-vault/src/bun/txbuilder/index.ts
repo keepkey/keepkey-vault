@@ -3,7 +3,7 @@
  */
 import { isTokenCaip, type ChainDef } from '../../shared/chains'
 import type { BuildTxParams } from '../../shared/types'
-import { decimalToBaseUnitsStrict, tokenMaxSpendableAmount, tokenMaxSpendableBaseUnits } from '../../shared/max-send'
+import { baseUnitsToDecimalString, decimalToBaseUnitsStrict, TON_DEPLOY_FEE_RESERVE_NANO, TON_TRANSFER_FEE_RESERVE_NANO, tokenMaxSpendableAmount, tokenMaxSpendableBaseUnits, tonMaxSpendableNano } from '../../shared/max-send'
 import { buildUtxoTx, type BuildUtxoParams, type XpubInfo } from './utxo'
 import { signUtxoTx } from './zcash-transparent'
 import { buildEvmTx, type BuildEvmParams } from './evm'
@@ -629,14 +629,6 @@ export async function buildTx(
       // TON — build v4r2 wallet transfer, device signs cell hash
       if (!params.fromAddress) throw new Error('fromAddress required for TON')
 
-      // Convert TON amount to nanoTON (9 decimals)
-      const nanoTon = (() => {
-        const parts = params.amount.split('.')
-        const whole = parts[0] || '0'
-        const frac = (parts[1] || '').slice(0, 9).padEnd(9, '0')
-        return String(BigInt(whole) * 1000000000n + BigInt(frac))
-      })()
-
       // Check wallet state — uninitialized wallets need StateInit in first tx
       let walletState: { initialized: boolean; balance: string }
       let destinationState: { initialized: boolean; balance: string }
@@ -656,6 +648,22 @@ export async function buildTx(
       if (needsDeploy && !params.publicKeyHex) {
         throw new Error('TON wallet not initialized — public key required for deployment')
       }
+
+      // Max: the live wallet balance minus the fee reserve (KEEPKEY-76). The UI
+      // sends amount '0' with isMax; never fall back to send_mode 128.
+      const nanoTon = params.isMax
+        ? (() => {
+            const spendable = tonMaxSpendableNano(walletState.balance, needsDeploy)
+            if (spendable === null) throw new Error(balanceErrorMessage('gasForMax'))
+            return String(spendable)
+          })()
+        : (() => {
+            // Convert TON amount to nanoTON (9 decimals)
+            const parts = params.amount.split('.')
+            const whole = parts[0] || '0'
+            const frac = (parts[1] || '').slice(0, 9).padEnd(9, '0')
+            return String(BigInt(whole) * 1000000000n + BigInt(frac))
+          })()
 
       const expireAt = Math.floor(Date.now() / 1000) + 300 // 5 minutes — hardware wallet confirm needs time
 
@@ -687,7 +695,7 @@ export async function buildTx(
         tonBuildResult: tonBuild,
       }
       // TON fees: ~0.005 TON for simple transfers, ~0.01 for deploy+transfer
-      return { unsignedTx: tonUnsignedTx, fee: needsDeploy ? '0.01' : '0.005' }
+      return { unsignedTx: tonUnsignedTx, fee: baseUnitsToDecimalString(needsDeploy ? TON_DEPLOY_FEE_RESERVE_NANO : TON_TRANSFER_FEE_RESERVE_NANO, 9) }
     }
 
     case 'hive': {

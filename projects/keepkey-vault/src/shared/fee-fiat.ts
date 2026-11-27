@@ -22,5 +22,8 @@ export function feeUsdFromNative(fee: string | undefined, nativeUnitPriceUsd: nu
  */
 export function feeFiatLabel(feeUsd: number | undefined, fmtCompact: (usd: number) => string): string {
   if (feeUsd === undefined || !Number.isFinite(feeUsd) || feeUsd <= 0) return ''
-  return feeUsd < 0.01 ? `<${fmtCompact(0.01)}` : fmtCompact(feeUsd)
+  if (feeUsd >= 0.01) return fmtCompact(feeUsd)
+  // Never a bare "<" when the formatter has nothing to print.
+  const floor = fmtCompact(0.01)
+  return floor ? `<${floor}` : ''
 }

@@ -33,4 +33,8 @@ describe('feeFiatLabel', () => {
 		expect(feeFiatLabel(undefined, fmt)).toBe('')
 		expect(feeFiatLabel(0, fmt)).toBe('')
 	})
+
+	it('never prints a bare "<" when the formatter has nothing to print', () => {
+		expect(feeFiatLabel(0.00039, () => '')).toBe('')
+	})
 })

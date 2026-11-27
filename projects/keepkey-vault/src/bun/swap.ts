@@ -24,6 +24,7 @@ import { resolveSwapEvmSchema } from './swap-evm-review'
 import { assertPrebuiltSwapExecution, assertSwapExecutionService } from './swap-preflight'
 import { assertNearIntentsPlainDeposit } from './near-intents-deposit'
 import { bufferedSwapGasLimit } from '../shared/swap-gas'
+import { l1DataFeeBufferWei } from '../shared/max-send'
 import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
 import { hasCompleteCertifiedSolanaEnvelope, supportsCertifiedClearSign } from './solana-certified-policy'
 import { getPioneer } from './pioneer'
@@ -2386,8 +2387,7 @@ async function buildEvmSwapTx(
 
     // L2 chains (OP Stack): reserve extra for L1 data posting fee, which is separate from
     // gasPrice * gasLimit. Without this, sendMax overspends by the L1 fee and gets rejected.
-    const L2_DATA_FEE_CHAINS = ['base', 'optimism', 'arbitrum']
-    const l1DataFeeBuffer = L2_DATA_FEE_CHAINS.includes(fromChain.id) ? BigInt(5e13) : 0n // 0.00005 ETH
+    const l1DataFeeBuffer = l1DataFeeBufferWei(fromChain.id)
     const totalGasReserve = finalGasFee + l1DataFeeBuffer
 
     // Re-adjust for sendMax with refined gas estimate + L1 data fee buffer

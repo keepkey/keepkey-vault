@@ -9,8 +9,9 @@ await setRecipient(`${to} `)
 await click('max'); await click('buildTransaction')
 expect(lastBuild()!.params).toMatchObject({ to, isMax: true })
 // The builder's outputs carry the trimmed address; the fee is half of what is sent.
+// The review prints the amount as the KeepKey does (coin_amnt_to_str: 0.0005 BTC).
 await complete(lastBuild()!, { fee: '0.0005', unsignedTx: { outputs: [{ addressType: 'spend', address: to, amount: '50000' }] } })
-const summary = { reviewAmount: text().includes('0.00050000 BTC'), maxPlaceholder: text().includes('MAX BTC'), feeWarning: text().includes('feeOverQuarter') }
+const summary = { reviewAmount: text().includes('0.0005 BTC'), maxPlaceholder: text().includes('MAX BTC'), feeWarning: text().includes('feeOverQuarter') }
 expect(summary).toEqual({ reviewAmount: true, maxPlaceholder: false, feeWarning: true })
 await unmount()
 // Equivalent, checksum-valid bech32 casing and surrounding whitespace still

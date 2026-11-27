@@ -6,6 +6,7 @@ import { Box, Flex, Text, VStack, Button, Input, Spinner } from "@chakra-ui/reac
 import { rpcRequest } from "../lib/rpc"
 import { playSent } from "../lib/sounds"
 import { formatBalance } from "../lib/formatting"
+import { deviceAmountText } from "../../shared/device-amount"
 import { describeSigningError } from "../lib/signing-errors"
 import { cancelDeviceSigning, signOnDevice } from "../lib/device-signing"
 import { useFiat } from "../lib/fiat-context"
@@ -329,6 +330,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 			if (!out || !/^\d+$/.test(String(out.amount))) return null
 			const [whole, fraction = ''] = baseUnitsToDecimalString(BigInt(out.amount), chain.decimals).split('.')
 			return chain.decimals > 0 ? `${whole}.${fraction.padEnd(chain.decimals, '0')}` : whole
+		}
+		// TON: the nanoTON amount the backend built from the live balance minus the fee reserve.
+		if (chain.chainFamily === 'ton') {
+			return /^\d+$/.test(String(tx?.amount ?? '')) ? baseUnitsToDecimalString(BigInt(tx.amount), chain.decimals) : null
 		}
 		if (chain.chainFamily !== 'evm' || !tx) return null
 		try {
@@ -1108,9 +1113,18 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("amount")}</Text>
 							<Flex direction="column" align="flex-end">
-								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{currentSigningContext.isMax ? (maxSentAmount ?? 'MAX') : currentSigningContext.amount} {currentSigningContext.displaySymbol}</Text>
-								{!isMax && amountUsdPreview !== null && (
-									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(amountUsdPreview)}</Text>
+								{/* KEEPKEY-126: exactly what the KeepKey will print, to compare with the OLED;
+								    below, rounded like the balance above (and its fiat value). */}
+								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" data-send-review-amount>
+									{reviewAmount
+										? deviceAmountText(reviewAmount, { chainFamily: chain.chainFamily, decimals: currentSigningContext.isTokenSend ? Number(token?.decimals ?? chain.decimals) : chain.decimals, isToken: currentSigningContext.isTokenSend, symbol: currentSigningContext.displaySymbol })
+											?? `${reviewAmount} ${currentSigningContext.displaySymbol}`
+										: `MAX ${currentSigningContext.displaySymbol}`}
+								</Text>
+								{reviewAmount && (
+									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted" data-send-review-approx>
+										≈ {formatBalance(reviewAmount)} {currentSigningContext.displaySymbol}{!isMax && amountUsdPreview !== null ? ` · ${fmtCompact(amountUsdPreview)}` : ''}
+									</Text>
 								)}
 							</Flex>
 						</Flex>

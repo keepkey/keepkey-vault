@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { buildEvmTx } from '../src/bun/txbuilder/evm'
 import { CHAINS } from '../src/shared/chains'
-import { tokenMaxSpendableBaseUnits } from '../src/shared/max-send'
+import { L1_DATA_FEE_BUFFER_WEI, l1DataFeeBufferWei, tokenMaxSpendableBaseUnits } from '../src/shared/max-send'
 import { validateAddress } from '../src/shared/address-validation'
 import { GAS_PRICE_ERROR } from '../src/shared/gas-price-errors'
 
@@ -31,7 +31,7 @@ describe('ERC-20 max send', () => {
   test('reads GetTokenBalance when the frontend has no positive amount', async () => {
     const pioneer = { ...pioneerWithBalance('1'), GetTokenBalance: async () => ({ data: { data: '17500.5' } }) }
     const result = await buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0', isMax: true, fromAddress, caip, tokenDecimals: 6 })
-    // Max keeps the shared one-base-unit precision reserve.
+    // Max uses the shared precision reserve (none at 6 decimals).
     expect(BigInt('0x' + String(result.data).slice(-64))).toBe(tokenMaxSpendableBaseUnits('17500.5', 6)!)
   })
 
@@ -55,7 +55,19 @@ describe('EVM max send', () => {
     expect(BigInt(result.gasPrice)).toBe(6_000_000n)
     const gasFee = BigInt(result.gasLimit) * 6_000_000n
     const gasReserve = (gasFee * 110n + 99n) / 100n
-    expect(BigInt(result.value)).toBe(1_000_000_000_000_000_000n - gasReserve)
+    // KEEPKEY-97: plus the 0.00005 ETH L1 data fee buffer the swap max already keeps.
+    expect(BigInt(result.value)).toBe(1_000_000_000_000_000_000n - gasReserve - L1_DATA_FEE_BUFFER_WEI)
+  })
+
+  test('L1 data fee buffer is only for the L2s that charge one', () => {
+    expect(['base', 'optimism', 'arbitrum', 'ethereum', 'polygon'].map(l1DataFeeBufferWei))
+      .toEqual([L1_DATA_FEE_BUFFER_WEI, L1_DATA_FEE_BUFFER_WEI, L1_DATA_FEE_BUFFER_WEI, 0n, 0n])
+  })
+
+  test('base max refuses a balance that only covers gas, not the L1 data fee', async () => {
+    const base = CHAINS.find(c => c.id === 'base')!
+    const pioneer = { ...pioneerWithBalance('0.00004'), GetGasPriceByNetwork: async () => ({ data: { average: '0.006' } }) }
+    await expect(buildEvmTx(pioneer, base, { to: toAddress, amount: '0', isMax: true, fromAddress })).rejects.toThrow()
   })
 
   test.each(['base', 'optimism', 'arbitrum'])('%s slow preset never bids below the quoted price', async (id) => {

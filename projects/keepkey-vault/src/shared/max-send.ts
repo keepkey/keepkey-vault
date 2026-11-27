@@ -1,4 +1,15 @@
 export const TOKEN_MAX_DISPLAY_DECIMALS = 8
+
+/**
+ * L2s that also charge an L1 data-posting fee on top of gasPrice × gasLimit.
+ * A native max send keeps this much back so it is not rejected for the L1 fee.
+ */
+export const L1_DATA_FEE_CHAIN_IDS: readonly string[] = ['base', 'optimism', 'arbitrum']
+export const L1_DATA_FEE_BUFFER_WEI = 50_000_000_000_000n // 0.00005 ETH
+
+export function l1DataFeeBufferWei(chainId: string): bigint {
+  return L1_DATA_FEE_CHAIN_IDS.includes(chainId) ? L1_DATA_FEE_BUFFER_WEI : 0n
+}
 const MAX_SAFE_DECIMALS = 255
 
 export function normalizeDecimals(decimals: unknown): number | null {
@@ -43,8 +54,10 @@ export function baseUnitsToDecimalString(units: bigint, decimals: unknown): stri
 export function tokenMaxPrecisionReserveUnits(decimals: unknown): bigint {
   const precision = normalizeDecimals(decimals)
   if (precision === null) return 1n
-  if (precision === 0) return 0n
-  return 10n ** BigInt(Math.max(0, precision - TOKEN_MAX_DISPLAY_DECIMALS))
+  // A balance with at most 8 decimals is shown exactly: nothing to reserve.
+  // Above that, keep back the one displayed 8-decimal quantum the rounding may hide.
+  if (precision <= TOKEN_MAX_DISPLAY_DECIMALS) return 0n
+  return 10n ** BigInt(precision - TOKEN_MAX_DISPLAY_DECIMALS)
 }
 
 export function tokenMaxSpendableBaseUnits(balance: string, decimals: unknown): bigint | null {
@@ -68,4 +81,20 @@ export function nativeMaxSpendableAmount(balance: string, decimals: unknown, res
   const spendableUnits = balanceUnits - reserveUnits
   if (spendableUnits <= 0n) return '0'
   return baseUnitsToDecimalString(spendableUnits, decimals)
+}
+
+/** TON fee reserve: ~0.005 TON for a transfer, ~0.01 TON when the wallet deploys in the same message. */
+export const TON_TRANSFER_FEE_RESERVE_NANO = 5_000_000n
+export const TON_DEPLOY_FEE_RESERVE_NANO = 10_000_000n
+
+/**
+ * TON max: the on-chain balance (nanoTON) minus the fee reserve. Never send_mode 128
+ * (carry all remaining balance), so the amount the device confirms is the amount sent.
+ * Returns null when the balance does not cover the reserve.
+ */
+export function tonMaxSpendableNano(balanceNano: string, needsDeploy: boolean): bigint | null {
+  if (!/^\d+$/.test(String(balanceNano ?? '').trim())) return null
+  const reserve = needsDeploy ? TON_DEPLOY_FEE_RESERVE_NANO : TON_TRANSFER_FEE_RESERVE_NANO
+  const spendable = BigInt(String(balanceNano).trim()) - reserve
+  return spendable > 0n ? spendable : null
 }
