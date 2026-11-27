@@ -3657,9 +3657,10 @@ async function scanOneChain(chainId: string, forceRefresh = false, ownerIsCurren
 // Pioneer's history cache (upserting the activity rows) and resyncs the balance
 // when the tx lands in a block.
 const txWatch = createTxWatch({
-	scanChain: async (chainId,txids=[]) => {
+	// forceRefresh is false while the chain backs off after a failure (KEEPKEY-207).
+	scanChain: async (chainId,txids=[],{forceRefresh=true}={forceRefresh:true}) => {
         const chain=getAllChains().find(row=>row.id===chainId)
-        if(chain?.chainFamily!=='evm')return (await scanOneChain(chainId,true,()=>true,'automatic')).rows
+        if(chain?.chainFamily!=='evm')return (await scanOneChain(chainId,forceRefresh,()=>true,'automatic')).rows
         const source=getEvmRpcSource(chain)
         if(!source)throw Error('EVM confirmation RPC is not configured')
         const epoch=activitySessionEpoch,scope=getWalletDbScope()
