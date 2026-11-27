@@ -366,9 +366,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		try {
 			setAppSettings(await rpcRequest<AppSettings>('setPasskeysEnabled', { enabled }))
 			window.dispatchEvent(new Event('keepkey-settings-changed'))
-		} catch (e: any) { setPasskeysError(e?.message || 'Could not change passkeys') }
+		} catch (e: any) { setPasskeysError(e?.message || uiText('Could not change passkeys')) }
 		finally { setTogglingPasskeys(false) }
-	}, [])
+	}, [uiText])
 	const [togglingMultisig,setTogglingMultisig]=useState(false)
     const [multisigError,setMultisigError]=useState<string|null>(null)
     const toggleMultisig=useCallback(async(enabled:boolean)=>{
@@ -1742,7 +1742,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							</Box>
 							<Box>
 								<Flex justify="space-between" align="center" gap="4">
-									<Flex align="center" gap="3" minW="0"><FeatureIcon kind="passwords" /><Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Passkeys")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{IS_WINDOWS ? uiText("Not available on Windows: Windows blocks apps from talking to the KeepKey's passkey (FIDO) interface directly.") : uiText("Experimental. Adds a Passkeys tab to the Vault menu: device status, and listing, renaming and deleting single passkeys. Off by default.")}</Text></Box></Flex>
+									<Flex align="center" gap="3" minW="0"><FeatureIcon kind="passwords" /><Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Passkeys")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{IS_WINDOWS ? uiText("Not available on Windows: Windows blocks apps from talking to the KeepKey's passkey (FIDO) interface directly.") : uiText("Experimental. Adds a Passkeys tab to the Vault menu to see, name and delete the passkeys on your KeepKey one by one, or erase them all. Off by default.")}</Text></Box></Flex>
 									{!IS_WINDOWS && <Toggle label={uiText('Passkeys')} checked={appSettings.passkeysEnabled === true} onChange={togglePasskeys} disabled={togglingPasskeys} />}
 								</Flex>
 								{passkeysError && <Text role="alert" fontSize="xs" color="kk.error">{passkeysError}</Text>}

@@ -151,5 +151,28 @@
 		"waiting": "Oczekiwanie na dostępność urządzenia...",
 		"supportLink": "Nadal masz problemy? Złóż zgłoszenie",
 		"defaultError": "Urządzenie zajęte przez inny proces"
+	},
+	"passkeys": {
+		"noDevice": "Nie znaleziono interfejsu FIDO KeepKey. Podłącz KeepKey (oprogramowanie 7.16 lub nowsze).",
+		"noAnswer": "KeepKey nie odpowiedział na czas. Spróbuj ponownie.",
+		"declined": "Odrzucono na KeepKey",
+		"cancelled": "Anulowano na KeepKey",
+		"noConfirmation": "Brak potwierdzenia na KeepKey na czas",
+		"refused": "KeepKey odrzucił żądanie",
+		"pinInvalid": "Nieprawidłowy PIN klucza bezpieczeństwa",
+		"pinBlocked": "PIN klucza bezpieczeństwa jest zablokowany. Jedynym sposobem jest wymazanie kluczy dostępu",
+		"pinAuthBlocked": "Za dużo błędnych PIN-ów. Odłącz i podłącz ponownie KeepKey, a potem spróbuj jeszcze raz",
+		"pinNotSet": "PIN klucza bezpieczeństwa nie jest jeszcze ustawiony",
+		"pinTooShort": "PIN musi mieć co najmniej 4 znaki",
+		"pinLength": "PIN musi mieć od 4 do 63 znaków",
+		"noCredential": "Tego klucza dostępu nie ma już na KeepKey",
+		"invalidId": "Nie udało się odczytać tego klucza dostępu. Odśwież listę i spróbuj ponownie.",
+		"resetNeedsReplug": "Wymazanie jest możliwe tylko w ciągu 10 sekund od włączenia KeepKey",
+		"resetDeclined": "Wymazanie odrzucono na KeepKey",
+		"resetNoPress": "Przycisk na KeepKey nie został naciśnięty na czas",
+		"replugTimeout": "KeepKey nie został odłączony i podłączony ponownie na czas",
+		"unexpected": "KeepKey wysłał nieoczekiwaną odpowiedź. Spróbuj ponownie.",
+		"unexpectedCode": "KeepKey wysłał nieoczekiwaną odpowiedź ({{code}}). Spróbuj ponownie.",
+		"busy": "KeepKey obsługuje inne żądanie. Poczekaj, aż się zakończy, i spróbuj ponownie."
 	}
 }

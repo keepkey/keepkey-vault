@@ -151,5 +151,28 @@
 		"wordNotFoundTitle": "无法识别单词",
 		"wordNotFoundMessage": "您输入的字符与有效的 BIP39 助记词不匹配。请仔细核对 KeepKey 屏幕上的乱序字母。",
 		"wordNotFoundRestarting": "从第 1 个单词重新开始 — 请重新输入您的单词..."
+	},
+	"passkeys": {
+		"noDevice": "未找到 KeepKey 的 FIDO 接口。请连接 KeepKey（固件 7.16 或更高版本）。",
+		"noAnswer": "KeepKey 未及时响应。请重试。",
+		"declined": "已在 KeepKey 上拒绝",
+		"cancelled": "已在 KeepKey 上取消",
+		"noConfirmation": "未及时在 KeepKey 上确认",
+		"refused": "KeepKey 拒绝了该请求",
+		"pinInvalid": "安全密钥 PIN 错误",
+		"pinBlocked": "安全密钥 PIN 已被锁定。只能清除通行密钥来解除",
+		"pinAuthBlocked": "错误 PIN 次数过多。请拔下并重新插入 KeepKey 后重试",
+		"pinNotSet": "尚未设置安全密钥 PIN",
+		"pinTooShort": "PIN 至少需要 4 个字符",
+		"pinLength": "PIN 必须为 4 到 63 个字符",
+		"noCredential": "该通行密钥已不在 KeepKey 上",
+		"invalidId": "无法读取该通行密钥。请刷新列表后重试。",
+		"resetNeedsReplug": "只能在 KeepKey 通电后 10 秒内清除",
+		"resetDeclined": "已在 KeepKey 上拒绝清除",
+		"resetNoPress": "未及时按下 KeepKey 上的按钮",
+		"replugTimeout": "未及时拔下并重新插入 KeepKey",
+		"unexpected": "KeepKey 返回了意外的响应。请重试。",
+		"unexpectedCode": "KeepKey 返回了意外的响应（{{code}}）。请重试。",
+		"busy": "KeepKey 正在处理其他请求。请等待完成后重试。"
 	}
 }

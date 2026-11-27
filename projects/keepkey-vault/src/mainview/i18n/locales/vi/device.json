@@ -151,5 +151,28 @@
 		"waiting": "Đang đợi thiết bị khả dụng...",
 		"supportLink": "Vẫn gặp sự cố? Gửi yêu cầu hỗ trợ",
 		"defaultError": "Thiết bị đang bận bởi tiến trình khác"
+	},
+	"passkeys": {
+		"noDevice": "Không tìm thấy giao diện FIDO của KeepKey. Hãy kết nối KeepKey (firmware 7.16 trở lên).",
+		"noAnswer": "KeepKey không phản hồi kịp thời. Hãy thử lại.",
+		"declined": "Đã từ chối trên KeepKey",
+		"cancelled": "Đã hủy trên KeepKey",
+		"noConfirmation": "Không xác nhận trên KeepKey kịp thời",
+		"refused": "KeepKey đã từ chối yêu cầu",
+		"pinInvalid": "Mã PIN khóa bảo mật không đúng",
+		"pinBlocked": "Mã PIN khóa bảo mật đã bị khóa. Cách duy nhất để gỡ là xóa các khóa truy cập",
+		"pinAuthBlocked": "Nhập sai mã PIN quá nhiều lần. Rút KeepKey ra rồi cắm lại, sau đó thử lại",
+		"pinNotSet": "Chưa đặt mã PIN khóa bảo mật",
+		"pinTooShort": "Mã PIN phải có ít nhất 4 ký tự",
+		"pinLength": "Mã PIN phải có từ 4 đến 63 ký tự",
+		"noCredential": "Khóa truy cập đó không còn trên KeepKey",
+		"invalidId": "Không đọc được khóa truy cập đó. Hãy làm mới danh sách rồi thử lại.",
+		"resetNeedsReplug": "Chỉ có thể xóa trong vòng 10 giây sau khi KeepKey khởi động",
+		"resetDeclined": "Thao tác xóa đã bị từ chối trên KeepKey",
+		"resetNoPress": "Không nhấn nút trên KeepKey kịp thời",
+		"replugTimeout": "KeepKey không được rút ra và cắm lại kịp thời",
+		"unexpected": "KeepKey gửi phản hồi không mong muốn. Hãy thử lại.",
+		"unexpectedCode": "KeepKey gửi phản hồi không mong muốn ({{code}}). Hãy thử lại.",
+		"busy": "KeepKey đang bận xử lý yêu cầu khác. Hãy đợi xong rồi thử lại."
 	}
 }

@@ -151,5 +151,28 @@
 		"wordNotFoundTitle": "単語が認識されませんでした",
 		"wordNotFoundMessage": "入力した文字は有効なBIP39シードワードと一致しません。KeepKeyの画面でスクランブルされた文字をもう一度確認してください。",
 		"wordNotFoundRestarting": "単語1から再開します — 単語を再入力してください..."
+	},
+	"passkeys": {
+		"noDevice": "KeepKeyのFIDOインターフェースが見つかりません。KeepKey（ファームウェア7.16以降）を接続してください。",
+		"noAnswer": "KeepKeyが時間内に応答しませんでした。もう一度お試しください。",
+		"declined": "KeepKeyで拒否されました",
+		"cancelled": "KeepKeyでキャンセルされました",
+		"noConfirmation": "KeepKeyで時間内に確認されませんでした",
+		"refused": "KeepKeyがリクエストを拒否しました",
+		"pinInvalid": "セキュリティキーのPINが違います",
+		"pinBlocked": "セキュリティキーのPINがロックされています。解除するにはパスキーを消去するしかありません",
+		"pinAuthBlocked": "PINの誤入力が多すぎます。KeepKeyを抜いて差し直してから、もう一度お試しください",
+		"pinNotSet": "セキュリティキーのPINはまだ設定されていません",
+		"pinTooShort": "PINは4文字以上にしてください",
+		"pinLength": "PINは4～63文字にしてください",
+		"noCredential": "そのパスキーはもうKeepKeyにありません",
+		"invalidId": "そのパスキーを読み取れませんでした。一覧を更新して、もう一度お試しください。",
+		"resetNeedsReplug": "消去できるのはKeepKeyの電源が入ってから10秒以内だけです",
+		"resetDeclined": "KeepKeyで消去が拒否されました",
+		"resetNoPress": "KeepKeyのボタンが時間内に押されませんでした",
+		"replugTimeout": "KeepKeyが時間内に抜き差しされませんでした",
+		"unexpected": "KeepKeyから予期しない応答がありました。もう一度お試しください。",
+		"unexpectedCode": "KeepKeyから予期しない応答がありました（{{code}}）。もう一度お試しください。",
+		"busy": "KeepKeyは別のリクエストを処理中です。完了してから、もう一度お試しください。"
 	}
 }

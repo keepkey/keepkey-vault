@@ -151,5 +151,28 @@
 		"wordNotFoundTitle": "Parola non riconosciuta",
 		"wordNotFoundMessage": "I caratteri inseriti non corrispondono a una parola seed BIP39 valida. Ricontrolla le lettere mescolate sullo schermo del tuo KeepKey.",
 		"wordNotFoundRestarting": "Riavvio dalla parola 1 — reinserisci le tue parole..."
+	},
+	"passkeys": {
+		"noDevice": "Interfaccia FIDO della KeepKey non trovata. Collega la KeepKey (firmware 7.16 o successivo).",
+		"noAnswer": "La KeepKey non ha risposto in tempo. Riprova.",
+		"declined": "Rifiutato sulla KeepKey",
+		"cancelled": "Annullato sulla KeepKey",
+		"noConfirmation": "Nessuna conferma sulla KeepKey in tempo",
+		"refused": "La KeepKey ha rifiutato la richiesta",
+		"pinInvalid": "PIN della chiave di sicurezza errato",
+		"pinBlocked": "Il PIN della chiave di sicurezza è bloccato. L'unico modo per sbloccarlo è cancellare le passkey",
+		"pinAuthBlocked": "Troppi PIN errati. Scollega e ricollega la KeepKey, poi riprova",
+		"pinNotSet": "Non è ancora impostato un PIN della chiave di sicurezza",
+		"pinTooShort": "Il PIN deve avere almeno 4 caratteri",
+		"pinLength": "Il PIN deve avere da 4 a 63 caratteri",
+		"noCredential": "Quella passkey non è più sulla KeepKey",
+		"invalidId": "Impossibile leggere quella passkey. Aggiorna l'elenco e riprova.",
+		"resetNeedsReplug": "La cancellazione è consentita solo entro 10 secondi dall'accensione della KeepKey",
+		"resetDeclined": "La cancellazione è stata rifiutata sulla KeepKey",
+		"resetNoPress": "Il pulsante della KeepKey non è stato premuto in tempo",
+		"replugTimeout": "La KeepKey non è stata scollegata e ricollegata in tempo",
+		"unexpected": "La KeepKey ha inviato una risposta inattesa. Riprova.",
+		"unexpectedCode": "La KeepKey ha inviato una risposta inattesa ({{code}}). Riprova.",
+		"busy": "La KeepKey è occupata con un'altra richiesta. Attendi che finisca, poi riprova."
 	}
 }

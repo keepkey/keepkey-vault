@@ -151,5 +151,28 @@
 		"wordNotFoundTitle": "Mot non reconnu",
 		"wordNotFoundMessage": "Les caractères saisis ne correspondent pas à un mot de graine BIP39 valide. Vérifiez les lettres mélangées sur l'écran de votre KeepKey.",
 		"wordNotFoundRestarting": "Redémarrage à partir du mot 1 — veuillez ressaisir vos mots..."
+	},
+	"passkeys": {
+		"noDevice": "Interface FIDO de la KeepKey introuvable. Connectez la KeepKey (firmware 7.16 ou plus récent).",
+		"noAnswer": "La KeepKey n'a pas répondu à temps. Réessayez.",
+		"declined": "Refusé sur la KeepKey",
+		"cancelled": "Annulé sur la KeepKey",
+		"noConfirmation": "Aucune confirmation sur la KeepKey à temps",
+		"refused": "La KeepKey a refusé la demande",
+		"pinInvalid": "PIN de la clé de sécurité incorrect",
+		"pinBlocked": "Le PIN de la clé de sécurité est bloqué. Effacer les clés d'accès est le seul moyen de le réinitialiser",
+		"pinAuthBlocked": "Trop de PIN incorrects. Débranchez puis rebranchez la KeepKey, puis réessayez",
+		"pinNotSet": "Aucun PIN de clé de sécurité n'est encore défini",
+		"pinTooShort": "Le PIN doit comporter au moins 4 caractères",
+		"pinLength": "Le PIN doit comporter de 4 à 63 caractères",
+		"noCredential": "Cette clé d'accès n'est plus sur la KeepKey",
+		"invalidId": "Impossible de lire cette clé d'accès. Actualisez la liste et réessayez.",
+		"resetNeedsReplug": "L'effacement n'est autorisé que dans les 10 secondes suivant la mise sous tension de la KeepKey",
+		"resetDeclined": "L'effacement a été refusé sur la KeepKey",
+		"resetNoPress": "Le bouton de la KeepKey n'a pas été pressé à temps",
+		"replugTimeout": "La KeepKey n'a pas été débranchée et rebranchée à temps",
+		"unexpected": "La KeepKey a envoyé une réponse inattendue. Réessayez.",
+		"unexpectedCode": "La KeepKey a envoyé une réponse inattendue ({{code}}). Réessayez.",
+		"busy": "La KeepKey traite une autre demande. Attendez qu'elle se termine, puis réessayez."
 	}
 }
