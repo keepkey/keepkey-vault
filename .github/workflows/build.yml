@@ -1047,6 +1047,10 @@ jobs:
     # must not match the release job's keepkey-vault-* download pattern.
     name: Windows x64 (unsigned build check)
     needs: [device-protocol-lib, monero-native-win32-x64]
+    # Until the manifests pin win32-x64 helpers, a failed native build must not
+    # block the release (macOS included); the staging step below still fails
+    # the build when pins exist and the helpers are missing.
+    if: ${{ !cancelled() && needs.device-protocol-lib.result == 'success' }}
     runs-on: windows-2022
     timeout-minutes: 150
     permissions:
@@ -1111,6 +1115,7 @@ jobs:
           & "$dir\zig-x86_64-windows-0.15.1\zig.exe" version
 
       - name: Download Monero native helpers
+        if: needs.monero-native-win32-x64.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: monero-native-win32-x64
@@ -1248,7 +1253,9 @@ jobs:
     # Releases come only from v* tags or release/* branches (pushed or
     # dispatched). A dispatch on any other branch builds and tests without
     # creating a draft release.
-    if: success() && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/'))
+    # Explicit results, not success(): success() also counts the indirect
+    # monero-native-win32-x64 job, which must not block a release before its pins exist.
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.intel-smoke.result == 'success' && needs.windows-unsigned.result == 'success' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

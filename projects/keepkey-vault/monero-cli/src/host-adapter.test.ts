@@ -28,9 +28,9 @@ describe('Monero host adapter admission', () => {
     expect(hostAdapterEnvironment('win32', String.raw`C:\Windows" & calc`)).toEqual({})
   })
 
-  test('the Windows pin names the adapter with .exe', () => {
-    const artifact = hostAdapterArtifact('win32-x64')
-    if (artifact) expect(artifact.filename).toBe('monero-host-adapter.exe')
+  // ponytail: skipped until the reviewed win32-x64 pin lands, so it never passes vacuously.
+  test.skipIf(!hostAdapterArtifact('win32-x64'))('the Windows pin names the adapter with .exe', () => {
+    expect(hostAdapterArtifact('win32-x64')!.filename).toBe('monero-host-adapter.exe')
   })
 
   test('optional absence is explicit; required absence and a supplied wrong pin fail', () => {
